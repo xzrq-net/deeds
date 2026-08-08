@@ -13,25 +13,45 @@ reading and editing files.
 ## Issues
 
 A `# Title` heading, then body. Optional frontmatter, only for blockers and
-non-default priority:
+non-default tier:
 
 ```
 ---
 blocked-by: [x9f2mk]
-priority: 2
+tier: nit
 ---
 # Adopt the new config loader
 
 Notes accumulate here as work proceeds.
 ```
 
-Priority runs 1 (urgent) to 9, default 5. A milestone is an ordinary issue
-blocked by its parts.
+A milestone is an ordinary issue blocked by its parts.
+
+## Tiers
+
+Tier is attention, not urgency: where the issue sits in the information
+hierarchy for whoever reads `ready` next.
+
+- `objective` — the human asked for it: requests, bug reports.
+- `baseline` — everything else the project needs. The default.
+- `nit` — drive-by nits and nice-to-haves.
+- `freezer` — parked; don't pick these up unprompted.
+
+Tiers never constrain edges: anything may block anything.
+
+## Sizing
+
+- Right-sized: one VCS change can close it. Bigger than that is a milestone —
+  file it blocked by its parts, splitting as parts become clear, not up front.
+- Smaller than that — a step of the current task — is conversation or `temp/`,
+  not an issue. File only what a future session would act on.
+- Clear scope you can state in the title: file it without asking. Fuzzy or
+  strategic scope, or a pile of related findings: ask before filing.
 
 ## Commands
 
 ```
-deeds ready              # unblocked open issues, priority order — pick from the top
+deeds ready              # unblocked open issues, tier order — pick from the top
 deeds new <title>        # mint an issue, print its path; edit the file from there
 deeds show <id>          # body plus blocked-by and blocks; --tree for the DAG
 deeds close <id> -m "…"  # append "Closed: …", move to closed/
@@ -39,8 +59,6 @@ deeds list               # open issues; --closed to include closed
 deeds check              # lint: parse errors, duplicate ids, cycles, unknown blockers
 deeds gc                 # delete issues closed >30 days ago; VCS history retains them
 ```
-
-Query commands (`new ready list show check`) take `--json`.
 
 ## Routing: where writing goes
 

@@ -38,7 +38,7 @@ impl<'a> Graph<'a> {
             .collect()
     }
 
-    /// Open issues with no open blockers, priority then id order.
+    /// Open issues with no open blockers, tier then id order.
     pub fn ready(&self) -> Vec<&'a Issue> {
         let mut out: Vec<&Issue> = self
             .by_id
@@ -46,7 +46,7 @@ impl<'a> Graph<'a> {
             .filter(|i| !i.closed && self.open_blockers(i).is_empty())
             .copied()
             .collect();
-        out.sort_by_key(|i| (i.priority, i.id.clone()));
+        out.sort_by_key(|i| (i.tier, i.id.clone()));
         out
     }
 
@@ -151,6 +151,28 @@ mod tests {
         let ready: Vec<&str> = g.ready().iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ready, ["aaaaaa", "cccccc", "eeeeee"]);
         assert_eq!(g.unknown_blockers(g.by_id["eeeeee"]), ["zzzzzz"]);
+    }
+
+    #[test]
+    fn ready_orders_by_tier() {
+        let issues = [
+            ("aaaaaa", "freezer"),
+            ("bbbbbb", "nit"),
+            ("cccccc", "baseline"),
+            ("dddddd", "objective"),
+        ]
+        .map(|(id, tier)| {
+            parse(
+                id,
+                Path::new("x"),
+                &format!("---\ntier: {tier}\n---\n# {id}\n"),
+                false,
+            )
+        });
+
+        let g = Graph::new(&issues);
+        let ready: Vec<&str> = g.ready().iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ready, ["dddddd", "cccccc", "bbbbbb", "aaaaaa"]);
     }
 
     #[test]

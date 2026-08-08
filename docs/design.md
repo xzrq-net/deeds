@@ -50,6 +50,13 @@ negligible over a personal tracker's lifetime (~0.1 expected reuses across
 conflict on, no hierarchy encoded in the ID (beads' dotted IDs make
 reparenting break identity).
 
+**Tiers, not priorities.** The one ordering signal is attention:
+`objective` (the human asked) / `baseline` (default) / `nit` / `freezer`,
+sorted in `ready`. Verbal, descriptive levels because "did the human ask for
+this" is checkable while a numeric urgency scale invites the priority
+inflation models learned from SWEs. Tiers never constrain edges; anything
+may block anything.
+
 **Decay instead of compaction.** Three tiers of retrieval cost, all plain
 text: open issues in `.deeds/`, closed in `closed/` (one step of navigation
 away from a browsing model), GC'd issues in VCS history only (deliberate
@@ -62,7 +69,7 @@ hot set stays small and salient without lossy summarization.
 
 **Pull, not push.** No hooks, no session injection, no settings.json.
 Tracker state never belongs in the prompt; the routing policy does, and it is
-static: a four-line markered block upserted into AGENTS.md points at one SKILL.md
+static: a one-line markered block upserted into AGENTS.md points at one SKILL.md
 (`.agents/skills/deeds/`, symlinked into `.claude/skills/`). Two tiers with
 different content — trigger vs. policy — so there is nothing to drift. Beads
 pushes context at SessionStart, which is the root of its five-copies-of-

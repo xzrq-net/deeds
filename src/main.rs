@@ -11,21 +11,22 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 
 use graph::Graph;
-use issue::{DEFAULT_PRIORITY, Issue, find_deeds_dir, load_all, mint_id};
+use issue::{DEFAULT_TIER, Issue, find_deeds_dir, load_all, mint_id, tier_name};
 
 #[derive(Parser)]
 #[command(about = "repo-local task graph; see docs/design.md", version)]
 struct Cli {
+    /// JSON output (query commands)
+    #[arg(long, global = true)]
+    json: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Create .deeds/ at the current directory
+    /// Create or refresh .deeds/, the AGENTS.md block, and the agent skill
     Init,
-    /// Init + AGENTS.md pointer + agent skill for this repo
-    Setup,
     /// Mint an issue and print its path
     New {
         /// Title words
@@ -34,23 +35,16 @@ enum Cmd {
         /// Blocker ids
         #[arg(short, long = "blocked-by", value_delimiter = ',')]
         blocked_by: Vec<String>,
-        /// 1 (urgent) to 9; unset means 5
-        #[arg(short, long)]
-        priority: Option<u8>,
-        #[arg(long)]
-        json: bool,
+        /// Attention tier; default baseline
+        #[arg(short, long, value_parser = clap::builder::PossibleValuesParser::new(issue::TIERS))]
+        tier: Option<String>,
     },
     /// Open issues with no open blockers
-    Ready {
-        #[arg(long)]
-        json: bool,
-    },
+    Ready,
     /// All open issues; --closed to include closed
     List {
         #[arg(long)]
         closed: bool,
-        #[arg(long)]
-        json: bool,
     },
     /// Print an issue plus both edge directions
     Show {
@@ -58,8 +52,6 @@ enum Cmd {
         /// Recursive blocker DAG instead of the flat footer
         #[arg(long)]
         tree: bool,
-        #[arg(long)]
-        json: bool,
     },
     /// Move to closed/; -m appends an outcome line first
     Close {
@@ -70,13 +62,10 @@ enum Cmd {
     },
     /// Lint the graph; nonzero exit on errors
     ///
-    /// Errors: malformed frontmatter, bad priority, malformed blocker ids,
+    /// Errors: malformed frontmatter, bad tier, malformed blocker ids,
     /// duplicate ids across open/closed, blocked-by cycles.
     /// Warnings: missing title, unknown blocker ids (treated as satisfied).
-    Check {
-        #[arg(long)]
-        json: bool,
-    },
+    Check,
     /// Delete closed issues untouched for --days; history is the archive
     Gc {
         #[arg(long, default_value_t = 30)]
@@ -85,34 +74,38 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().cmd {
+    let cli = Cli::parse();
+    let json = cli.json;
+    match cli.cmd {
         Cmd::Init => setup::init(&std::env::current_dir()?),
-        Cmd::Setup => setup::setup(&std::env::current_dir()?),
         Cmd::New {
             title,
             blocked_by,
-            priority,
-            json,
-        } => new(&title.join(" "), &blocked_by, priority, json),
-        Cmd::Ready { json } => ready(json),
-        Cmd::List { closed, json } => list(closed, json),
-        Cmd::Show { id, tree, json } => show(&id, tree, json),
+            tier,
+        } => new(&title.join(" "), &blocked_by, tier.as_deref(), json),
+        Cmd::Ready => ready(json),
+        Cmd::List { closed } => list(closed, json),
+        Cmd::Show { id, tree } => show(&id, tree, json),
         Cmd::Close { id, message } => close(&id, message.as_deref()),
-        Cmd::Check { json } => check(json),
+        Cmd::Check => check(json),
         Cmd::Gc { days } => gc(days),
     }
 }
 
-fn new(title: &str, blocked_by: &[String], priority: Option<u8>, json: bool) -> Result<()> {
+fn new(title: &str, blocked_by: &[String], tier: Option<&str>, json: bool) -> Result<()> {
     let deeds = find_deeds_dir()?;
-    if let Some(p) = priority
-        && !(1..=9).contains(&p)
-    {
-        bail!("priority must be 1-9");
-    }
     for id in blocked_by {
         if id.len() != issue::ID_LEN || !id.bytes().all(|b| issue::ID_ALPHABET.contains(&b)) {
             bail!("malformed blocker id: {id:?}");
+        }
+    }
+    // Unknown blockers stay satisfied-with-warning everywhere else; filing
+    // time is the cheapest moment to catch the typo.
+    let existing = load_all(&deeds)?;
+    let known = Graph::new(&existing);
+    for id in blocked_by {
+        if !known.by_id.contains_key(id.as_str()) {
+            eprintln!("warning: unknown blocker {id} (gc'd or typo), treated as satisfied");
         }
     }
 
@@ -120,8 +113,10 @@ fn new(title: &str, blocked_by: &[String], priority: Option<u8>, json: bool) -> 
     if !blocked_by.is_empty() {
         frontmatter += &format!("blocked-by: [{}]\n", blocked_by.join(", "));
     }
-    if let Some(p) = priority {
-        frontmatter += &format!("priority: {p}\n");
+    if let Some(t) = tier
+        && t != tier_name(DEFAULT_TIER)
+    {
+        frontmatter += &format!("tier: {t}\n");
     }
     let body = if frontmatter.is_empty() {
         format!("# {title}\n")
@@ -197,7 +192,7 @@ fn list(with_closed: bool, json: bool) -> Result<()> {
     warn_problems(&issues);
     let g = Graph::new(&issues);
     let mut rows: Vec<&Issue> = issues.iter().filter(|i| with_closed || !i.closed).collect();
-    rows.sort_by_key(|i| (i.closed, i.priority, i.id.clone()));
+    rows.sort_by_key(|i| (i.closed, i.tier, i.id.clone()));
     if json {
         let rows: Vec<_> = rows.iter().map(|i| issue_json(i, &g)).collect();
         println!("{}", serde_json::to_string_pretty(&rows)?);
@@ -429,7 +424,7 @@ fn issue_json(issue: &Issue, g: &Graph) -> serde_json::Value {
     json!({
         "id": issue.id,
         "title": issue.title,
-        "priority": issue.priority,
+        "tier": tier_name(issue.tier),
         "closed": issue.closed,
         "blocked_by": issue.blocked_by,
         "blocks": g.blocks(&issue.id).iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
@@ -441,8 +436,8 @@ fn print_table(rows: &[&Issue], g: &Graph) {
     for issue in rows {
         let open_blockers = g.open_blockers(issue);
         let mut flags = String::new();
-        if issue.priority != DEFAULT_PRIORITY {
-            flags += &format!(" p{}", issue.priority);
+        if issue.tier != DEFAULT_TIER {
+            flags += &format!(" {}", tier_name(issue.tier));
         }
         if issue.closed {
             flags += " closed";

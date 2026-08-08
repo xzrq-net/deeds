@@ -1,5 +1,3 @@
 <!-- deeds:begin -->
-Work is tracked in `.deeds/` — one markdown file per issue, `deeds` CLI for
-graph queries. Before starting, finishing, or filing work, read
-`.agents/skills/deeds/SKILL.md`.
+Task tracking lives in `.deeds/`; policy is the `deeds` skill (`.agents/skills/deeds/SKILL.md`).
 <!-- deeds:end -->

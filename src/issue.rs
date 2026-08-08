@@ -3,7 +3,19 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-pub const DEFAULT_PRIORITY: u8 = 5;
+/// Attention tiers, most to least salient; index is the sort rank.
+/// Verbal and descriptive on purpose: "did the human ask for this" is
+/// checkable, "how important is this" invites inflation.
+pub const TIERS: [&str; 4] = ["objective", "baseline", "nit", "freezer"];
+pub const DEFAULT_TIER: u8 = 1; // baseline
+
+pub fn tier_rank(name: &str) -> Option<u8> {
+    TIERS.iter().position(|t| *t == name).map(|p| p as u8)
+}
+
+pub fn tier_name(rank: u8) -> &'static str {
+    TIERS[rank as usize]
+}
 
 /// Lowercase, no confusables (i l o u / 0 1 excluded).
 pub const ID_ALPHABET: &[u8] = b"abcdefghjkmnpqrstvwxyz23456789";
@@ -16,7 +28,7 @@ pub struct Issue {
     pub id: String,
     pub title: String,
     pub blocked_by: Vec<String>,
-    pub priority: u8,
+    pub tier: u8,
     pub closed: bool,
     pub path: PathBuf,
     pub text: String,
@@ -29,7 +41,7 @@ pub fn parse(id: &str, path: &Path, text: &str, closed: bool) -> Issue {
         id: id.to_string(),
         title: String::new(),
         blocked_by: vec![],
-        priority: DEFAULT_PRIORITY,
+        tier: DEFAULT_TIER,
         closed,
         path: path.to_path_buf(),
         text: text.to_string(),
@@ -60,11 +72,13 @@ pub fn parse(id: &str, path: &Path, text: &str, closed: bool) -> Issue {
                     let ids = parse_id_list(value, &mut issue.problems);
                     issue.blocked_by.extend(ids);
                 }
-                "priority" => match value.trim().parse::<u8>() {
-                    Ok(p @ 1..=9) => issue.priority = p,
-                    _ => issue
-                        .problems
-                        .push(format!("priority not 1-9: {:?}", value.trim())),
+                "tier" => match tier_rank(value.trim()) {
+                    Some(r) => issue.tier = r,
+                    None => issue.problems.push(format!(
+                        "tier not one of {}: {:?}",
+                        TIERS.join("/"),
+                        value.trim()
+                    )),
                 },
                 // Unknown keys are advisory (wip: etc.) and carry no semantics.
                 _ => {}
@@ -166,15 +180,15 @@ mod tests {
         let i = p("# Fix the thing\n\nbody\n");
         assert_eq!(i.title, "Fix the thing");
         assert!(i.blocked_by.is_empty());
-        assert_eq!(i.priority, DEFAULT_PRIORITY);
+        assert_eq!(i.tier, DEFAULT_TIER);
         assert!(i.problems.is_empty());
     }
 
     #[test]
     fn frontmatter_forms() {
-        let i = p("---\nblocked-by: [x9f2mk, m3k2qw]\npriority: 2\n---\n# T\n");
+        let i = p("---\nblocked-by: [x9f2mk, m3k2qw]\ntier: nit\n---\n# T\n");
         assert_eq!(i.blocked_by, ["x9f2mk", "m3k2qw"]);
-        assert_eq!(i.priority, 2);
+        assert_eq!(i.tier, tier_rank("nit").unwrap());
         // Bare and underscore variants also accepted.
         assert_eq!(
             p("---\nblocked_by: x9f2mk\n---\n# T\n").blocked_by,
@@ -190,8 +204,8 @@ mod tests {
 
     #[test]
     fn lints_recorded() {
-        let i = p("---\npriority: 12\nblocked-by: [BAD!]\n# no terminator\n");
-        assert!(i.problems.iter().any(|p| p.contains("priority")));
+        let i = p("---\ntier: p1\nblocked-by: [BAD!]\n# no terminator\n");
+        assert!(i.problems.iter().any(|p| p.contains("tier")));
         assert!(i.problems.iter().any(|p| p.contains("malformed blocker")));
         assert!(i.problems.iter().any(|p| p.contains("unterminated")));
         assert!(i.problems.iter().any(|p| p.contains("no '# Title'")));
