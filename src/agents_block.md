@@ -1,3 +1,4 @@
 <!-- deeds:begin -->
-Task tracking lives in `.deeds/`; policy is the `deeds` skill (`.agents/skills/deeds/SKILL.md`).
+
+If present, use the `deeds` tool and skill for task tracking.
 <!-- deeds:end -->
