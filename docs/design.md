@@ -1,6 +1,6 @@
 # deeds design
 
-A repo-local task graph for one human and their coding agents. Reaction to
+A repo-local task graph for one human and his coding agents. Reaction to
 Steve Yegge's beads: keep the one good idea, delete the infrastructure that
 accreted around it.
 

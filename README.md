@@ -1,6 +1,6 @@
 # deeds
 
-Repo-local task graph for one human and their coding agents. One markdown
+Repo-local task graph for one human and his coding agents. One markdown
 file per issue in `.deeds/`; the VCS is the database, the merge engine, and
 the archive. See `docs/design.md` for rationale.
 
