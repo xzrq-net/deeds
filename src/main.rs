@@ -2,12 +2,14 @@ mod graph;
 mod issue;
 mod setup;
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 use serde_json::json;
 
 use graph::Graph;
@@ -34,6 +36,7 @@ enum Cmd {
         title: Vec<String>,
         /// Blocker ids
         #[arg(short, long = "blocked-by", value_delimiter = ',')]
+        #[arg(add = ArgValueCompleter::new(open_issue_ids))]
         blocked_by: Vec<String>,
         /// Attention tier; default baseline
         #[arg(short, long, value_parser = clap::builder::PossibleValuesParser::new(issue::TIERS))]
@@ -48,6 +51,7 @@ enum Cmd {
     },
     /// Print an issue plus both edge directions
     Show {
+        #[arg(add = ArgValueCompleter::new(|current: &OsStr| issue_ids(current, true)))]
         id: String,
         /// Recursive blocker DAG instead of the flat footer
         #[arg(long)]
@@ -55,6 +59,7 @@ enum Cmd {
     },
     /// Move to closed/; -m appends an outcome line first
     Close {
+        #[arg(add = ArgValueCompleter::new(open_issue_ids))]
         id: String,
         /// Outcome, appended to the body as "Closed: …"
         #[arg(short, long)]
@@ -74,6 +79,7 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
+    CompleteEnv::with_factory(Cli::command).complete();
     let cli = Cli::parse();
     let json = cli.json;
     match cli.cmd {
@@ -90,6 +96,25 @@ fn main() -> Result<()> {
         Cmd::Check => check(json),
         Cmd::Gc { days } => gc(days),
     }
+}
+
+fn open_issue_ids(current: &OsStr) -> Vec<CompletionCandidate> {
+    issue_ids(current, false)
+}
+
+fn issue_ids(current: &OsStr, with_closed: bool) -> Vec<CompletionCandidate> {
+    let Some(prefix) = current.to_str() else {
+        return vec![];
+    };
+    // Completion stays quiet outside a tracker or when its files can't be read.
+    let Ok(issues) = find_deeds_dir().and_then(|dir| load_all(&dir)) else {
+        return vec![];
+    };
+    issues
+        .into_iter()
+        .filter(|i| (with_closed || !i.closed) && i.id.starts_with(prefix))
+        .map(|i| CompletionCandidate::new(i.id).help(Some(i.title.into())))
+        .collect()
 }
 
 fn new(title: &str, blocked_by: &[String], tier: Option<&str>, json: bool) -> Result<()> {

@@ -22,6 +22,12 @@
 
     deeds = craneLib.buildPackage {
       src = pkgs.lib.cleanSource ./.;
+      postInstall = ''
+        mkdir -p "$out/share/zsh/site-functions"
+        COMPLETE=zsh "$out/bin/deeds" > "$out/share/zsh/site-functions/_deeds"
+        # fpath autoload must also complete on its first invocation.
+        echo '_clap_dynamic_completer_deeds "$@"' >> "$out/share/zsh/site-functions/_deeds"
+      '';
     };
   in {
     packages.x86_64-linux = {
