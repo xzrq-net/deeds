@@ -3,14 +3,12 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-const SKILL: &str = include_str!("skill.md");
 const AGENTS_BLOCK: &str = include_str!("agents_block.md");
 const MARKER_BEGIN: &str = "<!-- deeds:begin -->";
 const MARKER_END: &str = "<!-- deeds:end -->";
 
-/// `deeds init`: create or refresh the whole tracker at cwd — `.deeds/`,
-/// the AGENTS.md pointer block, the agent skill, the Claude symlink.
-/// Idempotent; rerun after upgrading deeds to refresh the skill text.
+/// `deeds init`: create or refresh the tracker at cwd — `.deeds/` and the
+/// AGENTS.md pointer block. Idempotent; rerun after upgrading deeds.
 /// Refuses under an existing tracker.
 pub fn init(root: &Path) -> Result<()> {
     for dir in root.ancestors().skip(1) {
@@ -26,39 +24,30 @@ pub fn init(root: &Path) -> Result<()> {
         println!("initialized {}", root.join(".deeds").display());
     }
     upsert_agents_block(&root.join("AGENTS.md"))?;
+    remove_legacy_skill(root)
+}
 
-    let skill_dir = root.join(".agents/skills/deeds");
-    let skill_path = skill_dir.join("SKILL.md");
-    if fs::read_to_string(&skill_path).ok().as_deref() != Some(SKILL) {
-        fs::create_dir_all(&skill_dir)?;
-        fs::write(&skill_path, SKILL)?;
-        println!("wrote {}", skill_path.display());
+/// Earlier versions installed the guide as a per-repo agent skill; `deeds
+/// skill` replaced it. Remove what init used to write.
+fn remove_legacy_skill(root: &Path) -> Result<()> {
+    let skill = root.join(".agents/skills/deeds/SKILL.md");
+    if skill.exists() {
+        fs::remove_file(&skill).with_context(|| format!("remove {}", skill.display()))?;
+        println!("removed {}", skill.display());
     }
-
-    let claude_skills = root.join(".claude/skills");
-    fs::create_dir_all(&claude_skills)?;
-    let link = claude_skills.join("deeds");
-    let target = Path::new("../../.agents/skills/deeds");
-    match fs::symlink_metadata(&link) {
-        Ok(meta) if meta.is_symlink() => {
-            let dest = fs::read_link(&link).unwrap_or_default();
-            if dest != target {
-                eprintln!(
-                    "warning: {} points elsewhere ({}); left alone",
-                    link.display(),
-                    dest.display()
-                );
-            }
-        }
-        Ok(_) => eprintln!(
-            "warning: {} exists and is not a symlink; left alone",
-            link.display()
-        ),
-        Err(_) => {
-            std::os::unix::fs::symlink(target, &link)
-                .with_context(|| format!("symlink {}", link.display()))?;
-            println!("linked {}", link.display());
-        }
+    let link = root.join(".claude/skills/deeds");
+    if fs::read_link(&link).is_ok_and(|dest| dest == Path::new("../../.agents/skills/deeds")) {
+        fs::remove_file(&link).with_context(|| format!("remove {}", link.display()))?;
+        println!("removed {}", link.display());
+    }
+    // remove_dir fails on non-empty dirs, which leaves anyone else's files be.
+    for dir in [
+        ".agents/skills/deeds",
+        ".agents/skills",
+        ".agents",
+        ".claude/skills",
+    ] {
+        let _ = fs::remove_dir(root.join(dir));
     }
     Ok(())
 }
@@ -119,38 +108,36 @@ mod tests {
     }
 
     #[test]
-    fn init_creates_and_refreshes_tracker_support_files() {
+    fn init_creates_tracker_and_removes_legacy_skill() {
         let dir = std::env::temp_dir().join(format!(
             "deeds-test-init-{}-{}",
             std::process::id(),
             fastrand::u64(..)
         ));
-        fs::create_dir_all(&dir).unwrap();
-
-        init(&dir).unwrap();
-        assert!(dir.join(".deeds/closed").is_dir());
-        assert_eq!(
-            fs::read_to_string(dir.join(".agents/skills/deeds/SKILL.md")).unwrap(),
-            SKILL
-        );
-        assert_eq!(
-            fs::read_link(dir.join(".claude/skills/deeds")).unwrap(),
-            Path::new("../../.agents/skills/deeds")
-        );
-
+        fs::create_dir_all(dir.join(".agents/skills/deeds")).unwrap();
+        fs::create_dir_all(dir.join(".claude/skills")).unwrap();
         fs::write(dir.join(".agents/skills/deeds/SKILL.md"), "stale\n").unwrap();
+        std::os::unix::fs::symlink(
+            "../../.agents/skills/deeds",
+            dir.join(".claude/skills/deeds"),
+        )
+        .unwrap();
+        fs::write(dir.join(".claude/settings.json"), "{}\n").unwrap();
         fs::write(
             dir.join("AGENTS.md"),
             format!("{MARKER_BEGIN}\nstale\n{MARKER_END}\n"),
         )
         .unwrap();
+
         init(&dir).unwrap();
+        assert!(dir.join(".deeds/closed").is_dir());
         assert_eq!(
-            fs::read_to_string(dir.join(".agents/skills/deeds/SKILL.md")).unwrap(),
-            SKILL
+            fs::read_to_string(dir.join("AGENTS.md")).unwrap(),
+            AGENTS_BLOCK
         );
-        let agents = fs::read_to_string(dir.join("AGENTS.md")).unwrap();
-        assert_eq!(agents, AGENTS_BLOCK);
+        assert!(!dir.join(".agents").exists());
+        assert!(fs::symlink_metadata(dir.join(".claude/skills")).is_err());
+        assert!(dir.join(".claude/settings.json").exists());
 
         fs::remove_dir_all(&dir).unwrap();
     }

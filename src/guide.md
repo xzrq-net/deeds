@@ -1,10 +1,3 @@
----
-name: deeds
-description:
-  This repo's task tracking and note-routing policy. Read before starting,
-  finishing, or filing work.
----
-
 # deeds
 
 Work is a graph of markdown files: one issue per file at `.deeds/<id>.md`,

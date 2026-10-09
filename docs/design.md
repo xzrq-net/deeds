@@ -69,12 +69,12 @@ hot set stays small and salient without lossy summarization.
 
 **Pull, not push.** No hooks, no session injection, no settings.json.
 Tracker state never belongs in the prompt; the routing policy does, and it is
-static: a one-line markered block upserted into AGENTS.md points at one SKILL.md
-(`.agents/skills/deeds/`, symlinked into `.claude/skills/`). Two tiers with
-different content — trigger vs. policy — so there is nothing to drift. Beads
-pushes context at SessionStart, which is the root of its five-copies-of-
-instructions sprawl: hooks per tool, fallback blocks for when hooks fail,
-skills for tools without hooks, dedup between the layers.
+static: a short markered block upserted into AGENTS.md points at `deeds skill`,
+which prints the guide compiled into the binary. Two tiers with different
+content — trigger vs. policy — and no per-repo copy of the policy, so there is
+nothing to drift. Beads pushes context at SessionStart, which is the root of
+its five-copies-of-instructions sprawl: hooks per tool, fallback blocks for
+when hooks fail, skills for tools without hooks, dedup between the layers.
 
 **No claims, no assignees.** Concurrency is partitioned by worktree; two
 agents taking the same issue surfaces as a one-file merge conflict at
@@ -84,8 +84,8 @@ conversation.
 
 ## Note routing (the practice half)
 
-The skill, not the binary, carries the repo's writing policy. Four surfaces
-by mutation pattern and reader distance:
+The guide (`deeds skill`), not the graph commands, carries the repo's writing
+policy. Four surfaces by mutation pattern and reader distance:
 
 | surface       | mutation                | reader                | decay             |
 |---------------|-------------------------|-----------------------|-------------------|

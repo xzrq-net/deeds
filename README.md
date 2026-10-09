@@ -5,7 +5,8 @@ file per issue in `.deeds/`; the VCS is the database, the merge engine, and
 the archive. See `docs/design.md` for rationale.
 
 ```
-deeds init               # .deeds/ + AGENTS.md block + agent skill; rerun to refresh
+deeds init               # .deeds/ + AGENTS.md block; rerun to refresh
+deeds skill              # print the agent guide
 deeds new <title>        # mint an issue, print its path
 deeds ready              # open issues with no open blockers
 deeds show <id> [--tree] # body + both edge directions

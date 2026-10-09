@@ -15,6 +15,8 @@ use serde_json::json;
 use graph::Graph;
 use issue::{DEFAULT_TIER, Issue, find_deeds_dir, load_all, mint_id, tier_name};
 
+const GUIDE: &str = include_str!("guide.md");
+
 #[derive(Parser)]
 #[command(about = "repo-local task graph; see docs/design.md", version)]
 struct Cli {
@@ -27,8 +29,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Create or refresh .deeds/, the AGENTS.md block, and the agent skill
+    /// Create or refresh .deeds/ and the AGENTS.md block
     Init,
+    /// Print the agent guide: workflow, tiers, note routing
+    Skill,
     /// Mint an issue and print its path
     New {
         /// Title words
@@ -84,6 +88,10 @@ fn main() -> Result<()> {
     let json = cli.json;
     match cli.cmd {
         Cmd::Init => setup::init(&std::env::current_dir()?),
+        Cmd::Skill => {
+            print!("{GUIDE}");
+            Ok(())
+        }
         Cmd::New {
             title,
             blocked_by,
