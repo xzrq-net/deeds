@@ -1,6 +1,7 @@
 mod graph;
 mod issue;
 mod setup;
+mod tui;
 
 use std::ffi::OsStr;
 use std::fs;
@@ -80,6 +81,8 @@ enum Cmd {
         #[arg(long, default_value_t = 30)]
         days: u64,
     },
+    /// Browse issues interactively (for humans)
+    Tui,
 }
 
 fn main() -> Result<()> {
@@ -103,6 +106,7 @@ fn main() -> Result<()> {
         Cmd::Close { id, message } => close(&id, message.as_deref()),
         Cmd::Check => check(json),
         Cmd::Gc { days } => gc(days),
+        Cmd::Tui => tui::run(),
     }
 }
 

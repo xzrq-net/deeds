@@ -82,6 +82,12 @@ integration, which is the correct failure: visible, textual, rare when work
 is partitioned sanely. Within a worktree, one agent hierarchy coordinates in
 conversation.
 
+**A viewer for the human.** `deeds tui` is for browsing without retyping
+ids: the blocker DAG top-down (an issue's children are its blockers), the
+ready frontier, recent closes. It writes nothing itself; `e` hands the file
+to `$EDITOR`, so the file stays the interface. It polls `.deeds/` and
+redraws when agents change it. Agents keep the CLI.
+
 ## Note routing (the practice half)
 
 The guide (`deeds skill`), not the graph commands, carries the repo's writing

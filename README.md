@@ -12,6 +12,7 @@ deeds ready              # open issues with no open blockers
 deeds show <id> [--tree] # body + both edge directions
 deeds close <id> -m "…"  # append outcome, move to closed/
 deeds list / check / gc  # inventory / lint / reap old closed
+deeds tui                # browse: blocker tree, ready, recently closed
 ```
 
 Issues are markdown with optional frontmatter (`blocked-by: [id, …]`,
