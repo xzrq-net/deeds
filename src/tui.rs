@@ -751,6 +751,9 @@ impl App {
                 tier_style(issue.tier),
             ));
         }
+        if !issue.closed && issue.for_you.is_some() {
+            spans.push("for you ".magenta());
+        }
         let title = Span::from(issue.title.clone());
         spans.push(if dim { title.dark_gray() } else { title });
         if row.cycle {

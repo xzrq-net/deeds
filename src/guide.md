@@ -37,6 +37,29 @@ tiering: objectives carry the user's words — don't reinterpret them without
 asking; baseline is shared ground — file and adjust freely, but surface big
 reshapes; nit and freezer are yours to file, retier, and consolidate at will.
 
+## For you
+
+When an issue needs the user (a decision, an action you can't take, a look
+at UX, a review of work product), write it in the issue under a
+`## For you` heading. Write it for them to read cold: what you need, why,
+your recommendation if you have one, and where the thing to look at is. A
+checklist (`- [ ]`) is fine. `deeds waiting` prints every open issue's
+section: that is the user's slate.
+
+- Asking doesn't stop the work: go on with what doesn't depend on the
+  answer, or with your recommendation where the user's recorded say-so
+  covers it.
+- The user answers freeform, often to several at once. Record each answer
+  in the issue it settles, quoted and dated, and remove what it settles from
+  `## For you`; drop the heading when nothing is left. An item that goes moot
+  leaves with a line saying why.
+- When the user grants autonomy ("your call", "this kind of project needs
+  no review"), record their words, dated, where the grant's scope lives: the
+  issue it covers, or the project's AGENTS.md for a class of work. Then
+  don't ask what it covers.
+- Spawned agents don't write `## For you`: they report what they'd ask, and
+  whoever spawned them files it.
+
 ## Sizing
 
 - An issue can represent a variety of scopes. The boundaries are a judgment
@@ -60,6 +83,7 @@ reshapes; nit and freezer are yours to file, retier, and consolidate at will.
 
 ```
 deeds ready              # unblocked open issues, tier order — pick from the top
+deeds waiting            # open issues' `## For you` sections: the user's slate
 deeds new <title>        # mint an issue, print its path; edit the file from there
 deeds show <id>          # body plus blocked-by and blocks; --tree for the DAG
 deeds close <id> -m "…"  # append "Closed: …", move to closed/
@@ -84,7 +108,8 @@ deeds gc                 # delete issues closed >30 days ago; VCS history retain
   self-contained statements, no transcripts, no "as discussed above".
 - File follow-ups the moment you notice them; don't carry them in the
   conversation.
-- Close an issue in the same VCS change as the work that satisfies it.
+- When to commit `.deeds/` changes is your call. Don't close an issue whose
+  `## For you` still asks something: it would drop off the slate.
 - Parallel agents don't pick work independently — whoever spawns them assigns
   specific issues.
 - To resurrect a gc'd issue, search VCS history for `.deeds/closed/<id>.md`.

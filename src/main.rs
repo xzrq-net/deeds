@@ -49,6 +49,8 @@ enum Cmd {
     },
     /// Open issues with no open blockers
     Ready,
+    /// What open issues ask of the human: their `## For you` sections
+    Waiting,
     /// All open issues; --closed to include closed
     List {
         #[arg(long)]
@@ -101,6 +103,7 @@ fn main() -> Result<()> {
             tier,
         } => new(&title.join(" "), &blocked_by, tier.as_deref(), json),
         Cmd::Ready => ready(json),
+        Cmd::Waiting => waiting(json),
         Cmd::List { closed } => list(closed, json),
         Cmd::Show { id, tree } => show(&id, tree, json),
         Cmd::Close { id, message } => close(&id, message.as_deref()),
@@ -224,6 +227,35 @@ fn ready(json: bool) -> Result<()> {
     Ok(())
 }
 
+fn waiting(json: bool) -> Result<()> {
+    let issues = load_all(&find_deeds_dir()?)?;
+    warn_problems(&issues);
+    let g = Graph::new(&issues);
+    let mut rows: Vec<&Issue> = issues
+        .iter()
+        .filter(|i| !i.closed && i.for_you.is_some())
+        .collect();
+    rows.sort_by_key(|i| (i.tier, i.id.clone()));
+    if json {
+        let rows: Vec<_> = rows.iter().map(|i| issue_json(i, &g)).collect();
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
+    if rows.is_empty() {
+        println!("nothing waits on you");
+    }
+    for (k, issue) in rows.iter().enumerate() {
+        if k > 0 {
+            println!();
+        }
+        print_table(&[issue], &g);
+        for line in issue.for_you.as_deref().unwrap_or_default().lines() {
+            println!("  {line}");
+        }
+    }
+    Ok(())
+}
+
 fn list(with_closed: bool, json: bool) -> Result<()> {
     let issues = load_all(&find_deeds_dir()?)?;
     warn_problems(&issues);
@@ -315,6 +347,13 @@ fn close(id: &str, message: Option<&str>) -> Result<()> {
         );
     }
 
+    if issue.for_you.is_some() {
+        eprintln!(
+            "warning: closing {id} with its '## {}' section still asking",
+            issue::FOR_YOU
+        );
+    }
+
     if let Some(msg) = message {
         // Append-mode: concurrent edits since load_all are not clobbered.
         let mut f = fs::OpenOptions::new().append(true).open(&issue.path)?;
@@ -368,6 +407,13 @@ fn check(json: bool) -> Result<()> {
             || !issue.id.bytes().all(|b| issue::ID_ALPHABET.contains(&b))
         {
             warnings.push(format!("{}: filename not a minted id", issue.id));
+        }
+        if issue.closed && issue.for_you.is_some() {
+            warnings.push(format!(
+                "{}: closed but still has a '## {}' section",
+                issue.id,
+                issue::FOR_YOU
+            ));
         }
         if !issue.closed {
             for unknown in g.unknown_blockers(issue) {
@@ -466,6 +512,7 @@ fn issue_json(issue: &Issue, g: &Graph) -> serde_json::Value {
         "blocked_by": issue.blocked_by,
         "blocks": g.blocks(&issue.id).iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
         "path": relative(&issue.path),
+        "for_you": issue.for_you,
     })
 }
 
@@ -475,6 +522,9 @@ fn print_table(rows: &[&Issue], g: &Graph) {
         let mut flags = String::new();
         if issue.tier != DEFAULT_TIER {
             flags += &format!(" {}", tier_name(issue.tier));
+        }
+        if !issue.closed && issue.for_you.is_some() {
+            flags += " for-you";
         }
         if issue.closed {
             flags += " closed";

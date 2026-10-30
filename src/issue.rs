@@ -32,6 +32,9 @@ pub struct Issue {
     pub closed: bool,
     pub path: PathBuf,
     pub text: String,
+    /// The body's `## For you` section: what the issue needs from the
+    /// human, written for them. None when absent or empty.
+    pub for_you: Option<String>,
     /// Lint findings from parsing; surfaced by `check`, ignored elsewhere.
     pub problems: Vec<String>,
 }
@@ -45,6 +48,7 @@ pub fn parse(id: &str, path: &Path, text: &str, closed: bool) -> Issue {
         closed,
         path: path.to_path_buf(),
         text: text.to_string(),
+        for_you: section(text, FOR_YOU),
         problems: vec![],
     };
 
@@ -97,6 +101,37 @@ pub fn parse(id: &str, path: &Path, text: &str, closed: bool) -> Issue {
         }
     }
     issue
+}
+
+pub const FOR_YOU: &str = "For you";
+
+/// A `## <name>` section's text, up to the next `#` or `##` heading;
+/// headings inside code fences don't count.
+fn section(text: &str, name: &str) -> Option<String> {
+    let mut fenced = false;
+    let mut body: Option<Vec<&str>> = None;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+        }
+        let heading = !fenced && (line.starts_with("# ") || line.starts_with("## "));
+        if heading && body.is_some() {
+            break;
+        }
+        match &mut body {
+            Some(b) => b.push(line),
+            None if heading => {
+                let title = line.trim_start_matches('#').trim();
+                if line.starts_with("## ") && title.eq_ignore_ascii_case(name) {
+                    body = Some(vec![]);
+                }
+            }
+            None => {}
+        }
+    }
+    let body = body?.join("\n");
+    let body = body.trim();
+    (!body.is_empty()).then(|| body.to_string())
 }
 
 fn parse_id_list(value: &str, problems: &mut Vec<String>) -> Vec<String> {
@@ -200,6 +235,28 @@ mod tests {
     fn advisory_keys_ignored() {
         let i = p("---\nwip: refactor-agent\n---\n# T\n");
         assert!(i.problems.is_empty());
+    }
+
+    #[test]
+    fn for_you_section() {
+        let i = p(
+            "# T\n\nnotes\n\n## For you\n\n- [ ] Try it on a phone\n### Detail\nmore\n\n## Log\nlater\n",
+        );
+        assert_eq!(
+            i.for_you.as_deref(),
+            Some("- [ ] Try it on a phone\n### Detail\nmore")
+        );
+        // Last section, any case.
+        assert_eq!(
+            p("# T\n## for YOU\nPick one.\n").for_you.as_deref(),
+            Some("Pick one.")
+        );
+        // Absent, empty, or only inside a code fence: nothing asked.
+        assert_eq!(p("# T\nbody\n").for_you, None);
+        assert_eq!(p("# T\n## For you\n\n## Next\nx\n").for_you, None);
+        assert_eq!(p("# T\n```\n## For you\nx\n```\n").for_you, None);
+        // A deeper heading of that name isn't the section.
+        assert_eq!(p("# T\n### For you\nx\n").for_you, None);
     }
 
     #[test]

@@ -25,9 +25,11 @@ SQLite cache, export daemon, and eventual Dolt migration are all consequences
 of one line-per-issue JSONL making the VCS merge at the wrong granularity.
 Per-issue files make the VCS the merge engine at the right granularity.
 
-**Branch-local, deliberately.** Issue state merges atomically with the code
-that satisfies it: close an issue in the change that fixes it and trunk never
-claims an unlanded fix. The cost — an issue filed on a branch is invisible
+**Branch-local, deliberately.** Issue state can merge atomically with the
+code that satisfies it: close an issue in the change that fixes it and trunk
+never claims an unlanded fix. The guide leaves when to commit `.deeds/` to
+the agent: a tracker kept apart from the code it tracks can't share its
+changes. The cost — an issue filed on a branch is invisible
 elsewhere until merge — is accepted; trunk-worthy discoveries get filed on
 trunk. No sync mechanism exists because the VCS is the sync mechanism.
 
@@ -81,6 +83,14 @@ agents taking the same issue surfaces as a one-file merge conflict at
 integration, which is the correct failure: visible, textual, rare when work
 is partitioned sanely. Within a worktree, one agent hierarchy coordinates in
 conversation.
+
+**Requests for the human, in prose.** What an issue needs from the human (a
+decision, an action, a review) goes in its body under `## For you`, written
+for them; `waiting` is the query that consumes it, the human's slate across
+issues. A section, not a field or an assignee: the ask is freeform markdown
+(a checklist when that fits), it is cleared by editing it away as the answer
+is recorded, and an issue both parties act on doesn't have to split. A
+closed issue that still asks is a lint.
 
 **A viewer for the human.** `deeds tui` is for browsing without retyping
 ids: the blocker DAG top-down (an issue's children are its blockers), the

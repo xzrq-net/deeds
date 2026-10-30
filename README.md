@@ -9,6 +9,7 @@ deeds init               # .deeds/ + AGENTS.md block; rerun to refresh
 deeds skill              # print the agent guide
 deeds new <title>        # mint an issue, print its path
 deeds ready              # open issues with no open blockers
+deeds waiting            # what open issues ask of the human (## For you)
 deeds show <id> [--tree] # body + both edge directions
 deeds close <id> -m "…"  # append outcome, move to closed/
 deeds list / check / gc  # inventory / lint / reap old closed
