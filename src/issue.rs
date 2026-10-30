@@ -105,33 +105,76 @@ pub fn parse(id: &str, path: &Path, text: &str, closed: bool) -> Issue {
 
 pub const FOR_YOU: &str = "For you";
 
-/// A `## <name>` section's text, up to the next `#` or `##` heading;
-/// headings inside code fences don't count.
-fn section(text: &str, name: &str) -> Option<String> {
-    let mut fenced = false;
-    let mut body: Option<Vec<&str>> = None;
-    for line in text.lines() {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-        }
-        let heading = !fenced && (line.starts_with("# ") || line.starts_with("## "));
-        if heading && body.is_some() {
-            break;
-        }
-        match &mut body {
-            Some(b) => b.push(line),
-            None if heading => {
-                let title = line.trim_start_matches('#').trim();
-                if line.starts_with("## ") && title.eq_ignore_ascii_case(name) {
-                    body = Some(vec![]);
-                }
+/// The body's `#` and `##` headings as (line index, level, title), past
+/// code fences: ``` or ~~~, up to three spaces in, closed by a run of the
+/// same character at least as long.
+fn headings(text: &str) -> Vec<(usize, usize, &str)> {
+    let mut fence: Option<(char, usize)> = None;
+    let mut out = vec![];
+    for (k, line) in text.lines().enumerate() {
+        let rest = line.trim_start_matches(' ');
+        let near = line.len() - rest.len() < 4;
+        let run = |c: char| rest.chars().take_while(|&b| b == c).count();
+        if let Some((c, n)) = fence {
+            if near && run(c) >= n && rest.trim_start_matches(c).trim().is_empty() {
+                fence = None;
             }
-            None => {}
+            continue;
+        }
+        if let Some(c) = ['`', '~'].into_iter().find(|&c| near && run(c) >= 3) {
+            fence = Some((c, run(c)));
+            continue;
+        }
+        let level = line.chars().take_while(|&c| c == '#').count();
+        if (level == 1 || level == 2) && line[level..].starts_with(' ') {
+            let title = line[level..].trim();
+            // An optional closing run of #s, as in `## For you ##`.
+            let bare = title.trim_end_matches('#');
+            let title = if bare.is_empty() || bare.ends_with(' ') {
+                bare.trim()
+            } else {
+                title
+            };
+            out.push((k, level, title));
         }
     }
-    let body = body?.join("\n");
+    out
+}
+
+fn is_section(heading: &(usize, usize, &str), name: &str) -> bool {
+    heading.1 == 2 && heading.2.eq_ignore_ascii_case(name)
+}
+
+/// A `## <name>` section's text, up to the next `#` or `##` heading. None
+/// when absent, or holding nothing but whitespace and HTML comments.
+fn section(text: &str, name: &str) -> Option<String> {
+    let heads = headings(text);
+    let at = heads.iter().position(|h| is_section(h, name))?;
+    let start = heads[at].0 + 1;
+    let end = heads.get(at + 1).map_or(usize::MAX, |h| h.0);
+    let lines: Vec<&str> = text.lines().take(end).skip(start).collect();
+    let body = lines.join("\n");
     let body = body.trim();
-    (!body.is_empty()).then(|| body.to_string())
+    (!without_comments(body).trim().is_empty()).then(|| body.to_string())
+}
+
+/// Whether the body's last section is `## <name>`, empty or not: text
+/// appended to the file would land in it.
+pub fn ends_in(text: &str, name: &str) -> bool {
+    headings(text).last().is_some_and(|h| is_section(h, name))
+}
+
+fn without_comments(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(open) = rest.find("<!--") {
+        out += &rest[..open];
+        match rest[open..].find("-->") {
+            Some(close) => rest = &rest[open + close + 3..],
+            None => return out + &rest[open..],
+        }
+    }
+    out + rest
 }
 
 fn parse_id_list(value: &str, problems: &mut Vec<String>) -> Vec<String> {
@@ -257,6 +300,40 @@ mod tests {
         assert_eq!(p("# T\n```\n## For you\nx\n```\n").for_you, None);
         // A deeper heading of that name isn't the section.
         assert_eq!(p("# T\n### For you\nx\n").for_you, None);
+        // Closing hashes; a comment alone asks nothing.
+        assert_eq!(p("# T\n## For you ##\nx\n").for_you.as_deref(), Some("x"));
+        assert_eq!(p("# T\n## For you\n<!-- none -->\n").for_you, None);
+        assert_eq!(
+            p("# T\n## For you\n<!-- note -->\nx\n").for_you.as_deref(),
+            Some("<!-- note -->\nx")
+        );
+    }
+
+    #[test]
+    fn fences_hide_headings() {
+        // A ~~~ block's heading is code, and the ask goes on past it.
+        let i = p("# T\n## For you\nRun:\n~~~sh\n## a comment\n~~~\nthen tell me.\n");
+        assert_eq!(
+            i.for_you.as_deref(),
+            Some("Run:\n~~~sh\n## a comment\n~~~\nthen tell me.")
+        );
+        // A ```` fence holds ``` lines, and its headings stay quoted.
+        assert_eq!(
+            p("# T\n````md\n```\n## For you\nx\n```\n````\n").for_you,
+            None
+        );
+        // Indented four spaces, ``` is code, not a fence.
+        assert_eq!(
+            p("# T\n    ```\n## For you\nx\n").for_you.as_deref(),
+            Some("x")
+        );
+    }
+
+    #[test]
+    fn ends_in_a_section() {
+        assert!(ends_in("# T\n## For you\n\n", FOR_YOU));
+        assert!(!ends_in("# T\n## For you\nx\n## Log\n", FOR_YOU));
+        assert!(!ends_in("# T\n", FOR_YOU));
     }
 
     #[test]

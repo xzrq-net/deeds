@@ -244,11 +244,12 @@ fn waiting(json: bool) -> Result<()> {
     if rows.is_empty() {
         println!("nothing waits on you");
     }
+    let width = flags_width(&rows, &g);
     for (k, issue) in rows.iter().enumerate() {
         if k > 0 {
             println!();
         }
-        print_table(&[issue], &g);
+        print_row(issue, &g, width);
         for line in issue.for_you.as_deref().unwrap_or_default().lines() {
             println!("  {line}");
         }
@@ -362,7 +363,13 @@ fn close(id: &str, message: Option<&str>) -> Result<()> {
         } else {
             "\n\n"
         };
-        f.write_all(format!("{lead}Closed: {msg}\n").as_bytes())?;
+        // Under its own heading if it would land in a `## For you`.
+        let head = if issue::ends_in(&issue.text, issue::FOR_YOU) {
+            "## Closed\n\n"
+        } else {
+            ""
+        };
+        f.write_all(format!("{lead}{head}Closed: {msg}\n").as_bytes())?;
     }
     let dest = deeds.join("closed").join(format!("{id}.md"));
     if dest.exists() {
@@ -517,29 +524,45 @@ fn issue_json(issue: &Issue, g: &Graph) -> serde_json::Value {
 }
 
 fn print_table(rows: &[&Issue], g: &Graph) {
+    let width = flags_width(rows, g);
     for issue in rows {
-        let open_blockers = g.open_blockers(issue);
-        let mut flags = String::new();
-        if issue.tier != DEFAULT_TIER {
-            flags += &format!(" {}", tier_name(issue.tier));
-        }
-        if !issue.closed && issue.for_you.is_some() {
-            flags += " for-you";
-        }
-        if issue.closed {
-            flags += " closed";
-        } else if !open_blockers.is_empty() {
-            flags += &format!(
-                " blocked({})",
-                open_blockers
-                    .iter()
-                    .map(|b| b.id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-        }
-        println!("{}{flags:<12} {}", issue.id, issue.title);
+        print_row(issue, g, width);
     }
+}
+
+/// The flags column fits its rows' tiers and marks; a long blocker list
+/// overflows its own row only.
+fn flags_width(rows: &[&Issue], g: &Graph) -> usize {
+    let widest = rows.iter().map(|i| flags(i, g).len()).max().unwrap_or(0);
+    widest.clamp(12, 20)
+}
+
+fn print_row(issue: &Issue, g: &Graph, width: usize) {
+    println!("{}{:<width$} {}", issue.id, flags(issue, g), issue.title);
+}
+
+fn flags(issue: &Issue, g: &Graph) -> String {
+    let open_blockers = g.open_blockers(issue);
+    let mut flags = String::new();
+    if issue.tier != DEFAULT_TIER {
+        flags += &format!(" {}", tier_name(issue.tier));
+    }
+    if !issue.closed && issue.for_you.is_some() {
+        flags += " for-you";
+    }
+    if issue.closed {
+        flags += " closed";
+    } else if !open_blockers.is_empty() {
+        flags += &format!(
+            " blocked({})",
+            open_blockers
+                .iter()
+                .map(|b| b.id.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
+    flags
 }
 
 fn relative(path: &Path) -> String {

@@ -39,24 +39,27 @@ reshapes; nit and freezer are yours to file, retier, and consolidate at will.
 
 ## For you
 
-When an issue needs the user (a decision, an action you can't take, a look
-at UX, a review of work product), write it in the issue under a
-`## For you` heading. Write it for them to read cold: what you need, why,
-your recommendation if you have one, and where the thing to look at is. A
-checklist (`- [ ]`) is fine. `deeds waiting` prints every open issue's
-section: that is the user's slate.
+What the user can answer now, ask in chat. What outlives the conversation
+you're in goes in the issue under a `## For you` heading: a decision, an
+action you can't take, a look at UX, a review of work product, when the user
+is away, the answer waits on something, or the work is still landing. Write
+it for them to read cold: what you need, why, your recommendation if you
+have one, and where the thing to look at is. A checklist (`- [ ]`) is fine.
+`deeds waiting` prints every open issue's section: that is the user's slate.
+When you file one, say so in your reply, a line naming the issue.
 
 - Asking doesn't stop the work: go on with what doesn't depend on the
   answer, or with your recommendation where the user's recorded say-so
   covers it.
-- The user answers freeform, often to several at once. Record each answer
-  in the issue it settles, quoted and dated, and remove what it settles from
-  `## For you`; drop the heading when nothing is left. An item that goes moot
-  leaves with a line saying why.
+- `## For you` holds only what is still asked. The user answers freeform,
+  often to several at once: record each answer in the notes of the issue it
+  settles, quoted and dated, outside the section, and remove what it settles
+  from the section; drop the heading when nothing is left. An item that goes
+  moot is removed the same way, with a line in the notes saying why.
 - When the user grants autonomy ("your call", "this kind of project needs
   no review"), record their words, dated, where the grant's scope lives: the
-  issue it covers, or the project's AGENTS.md for a class of work. Then
-  don't ask what it covers.
+  notes of the issue it covers, or the project's AGENTS.md for a class of
+  work. Then don't ask what it covers.
 - Spawned agents don't write `## For you`: they report what they'd ask, and
   whoever spawned them files it.
 
