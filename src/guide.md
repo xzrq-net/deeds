@@ -39,29 +39,12 @@ reshapes; nit and freezer are yours to file, retier, and consolidate at will.
 
 ## For you
 
-What the user can answer now, ask in chat. What outlives the conversation
-you're in goes in the issue under a `## For you` heading: a decision, an
-action you can't take, a look at UX, a review of work product, when the user
-is away, the answer waits on something, or the work is still landing. Write
-it for them to read cold: what you need, why, your recommendation if you
-have one, and where the thing to look at is. A checklist (`- [ ]`) is fine.
-`deeds waiting` prints every open issue's section: that is the user's slate.
-When you file one, say so in your reply, a line naming the issue.
-
-- Asking doesn't stop the work: go on with what doesn't depend on the
-  answer, or with your recommendation where the user's recorded say-so
-  covers it.
-- `## For you` holds only what is still asked. The user answers freeform,
-  often to several at once: record each answer in the notes of the issue it
-  settles, quoted and dated, outside the section, and remove what it settles
-  from the section; drop the heading when nothing is left. An item that goes
-  moot is removed the same way, with a line in the notes saying why.
-- When the user grants autonomy ("your call", "this kind of project needs
-  no review"), record their words, dated, where the grant's scope lives: the
-  notes of the issue it covers, or the project's AGENTS.md for a class of
-  work. Then don't ask what it covers.
-- Spawned agents don't write `## For you`: they report what they'd ask, and
-  whoever spawned them files it.
+What an issue needs from the user beyond the current conversation (a
+decision, an action, a review) goes in its `## For you` section; `deeds
+waiting` lists them all. Record the user's answer in the issue's notes,
+dated, and remove what it settles from the section. Grants of autonomy
+("your call") go in the user's words where their scope lives: the issue, or
+AGENTS.md.
 
 ## Sizing
 
@@ -111,8 +94,7 @@ deeds gc                 # delete issues closed >30 days ago; VCS history retain
   self-contained statements, no transcripts, no "as discussed above".
 - File follow-ups the moment you notice them; don't carry them in the
   conversation.
-- When to commit `.deeds/` changes is your call. Don't close an issue whose
-  `## For you` still asks something: it would drop off the slate.
+- When to commit `.deeds/` changes is your call.
 - Parallel agents don't pick work independently — whoever spawns them assigns
   specific issues.
 - To resurrect a gc'd issue, search VCS history for `.deeds/closed/<id>.md`.
