@@ -37,14 +37,13 @@ tiering: objectives carry the user's words — don't reinterpret them without
 asking; baseline is shared ground — file and adjust freely, but surface big
 reshapes; nit and freezer are yours to file, retier, and consolidate at will.
 
-## For you
+## "For you"
 
-What an issue needs from the user beyond the current conversation (a
-decision, an action, a review) goes in its `## For you` section; `deeds
-waiting` lists them all. Record the user's answer in the issue's notes,
-dated, and remove what it settles from the section. Grants of autonomy
-("your call") go in the user's words where their scope lives: the issue, or
-AGENTS.md.
+What an issue needs from the user beyond the current conversation (decisions,
+actions, reviews) goes in its `## For you` section. Tooling like `deeds waiting`
+presents this content to the user. Format each item as a - [ ] markdown
+checkbox. The user will respond in the conversation or inline in the file.
+Remove completed items from the section and absorb them.
 
 ## Sizing
 
