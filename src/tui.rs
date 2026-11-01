@@ -50,7 +50,7 @@ struct Row {
     id: String,
     /// Ancestor ids plus own id: tells apart repeats of a shared blocker.
     key: String,
-    /// None for a blocker id with no file: gc'd or a typo.
+    /// None for a blocker id with no file: a typo, or filed elsewhere.
     issue: Option<usize>,
     depth: usize,
     /// Tree guides and fold marker; empty in flat views.
@@ -281,8 +281,8 @@ impl App {
         }
     }
 
-    /// Blockers drawn under an issue. Unknown ids are mostly gc'd closed
-    /// issues, so they ride along with the closed toggle.
+    /// Blockers drawn under an issue. Unknown ids always show: with nothing
+    /// deleting issues, one is worth seeing.
     fn children(&self, n: usize) -> Vec<&str> {
         let mut kids: Vec<&str> = self.issues[n]
             .blocked_by
@@ -290,7 +290,7 @@ impl App {
             .map(String::as_str)
             .filter(|id| match self.index.get(*id) {
                 Some(&k) => self.shown(k),
-                None => self.show_closed,
+                None => true,
             })
             .collect();
         kids.sort_by_key(|id| self.sort_key(id));
@@ -733,7 +733,7 @@ impl App {
     fn row_line(&self, row: &Row, g: &Graph) -> Line<'static> {
         let mut spans = vec![Span::from(row.guide.clone()).dark_gray()];
         let Some(n) = row.issue else {
-            spans.push(format!("? {} gone", row.id).dark_gray());
+            spans.push(format!("? {} unknown", row.id).dark_gray());
             return Line::from(spans);
         };
         let issue = &self.issues[n];
@@ -765,13 +765,12 @@ impl App {
     fn content(&self, row: &Row, g: &Graph, width: u16) -> Text<'static> {
         let Some(n) = row.issue else {
             return Text::from(vec![
-                Line::from(vec![row.id.clone().bold(), "  gone".dark_gray()]),
+                Line::from(vec![row.id.clone().bold(), "  unknown".dark_gray()]),
                 Line::default(),
-                Line::from(format!(
-                    "Named as a blocker, but no file has this id: gc'd or a typo. \
-                     Gc'd issues live in the tracker's VCS history as closed/{}.md.",
-                    row.id
-                )),
+                Line::from(
+                    "Named as a blocker, but no file has this id: a typo, an issue \
+                     filed on a branch not merged here, or one deleted by hand.",
+                ),
             ]);
         };
         let issue = &self.issues[n];
@@ -838,7 +837,7 @@ fn edge_line(label: &str, id: &str, g: &Graph) -> Line<'static> {
             spans.push(format!("{id} ").into());
             spans.push(if b.closed { title.dark_gray() } else { title });
         }
-        None => spans.push(format!("? {id} gone").dark_gray()),
+        None => spans.push(format!("? {id} unknown").dark_gray()),
     }
     Line::from(spans)
 }
@@ -998,7 +997,7 @@ mod tests {
         assert_eq!(drawn(&app).last().unwrap(), "▸ zzzzzz");
         app.list.select(Some(app.rows.len() - 1));
         app.toggle_fold();
-        // gggggg has no file: shown as gone, sorted last.
+        // gggggg has no file: shown as unknown, sorted last.
         assert_eq!(
             drawn(&app)[app.rows.len() - 3..],
             ["▾ zzzzzz", "├── pppppp", "└── gggggg"]

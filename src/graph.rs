@@ -27,7 +27,7 @@ impl<'a> Graph<'a> {
             .collect()
     }
 
-    /// Blocker IDs that resolve to no file at all: GC'd or mistyped.
+    /// Blocker IDs that resolve to no file at all: mistyped, or filed elsewhere.
     /// Treated as satisfied; callers surface the warning.
     pub fn unknown_blockers<'b>(&self, issue: &'b Issue) -> Vec<&'b str> {
         issue

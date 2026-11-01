@@ -353,3 +353,46 @@ fn skill_follows_the_mode() {
     let text = out(&run(&s.0, Some(&s.0.join("not-yet")), &["skill"], None));
     assert!(text.contains("deeds commits the tracker itself") && !text.contains(".deeds/"));
 }
+
+#[test]
+fn completion_offers_open_and_the_latest_closes() {
+    let s = Scratch::new();
+    let dir = s.path("project/.deeds");
+    let project = s.0.join("project");
+    let open = new_id(&run(&project, None, &["new", "open"], None));
+    // Twelve closed issues, closed a minute apart, oldest first.
+    let mut closed = Vec::new();
+    for n in 0..12u64 {
+        let id = new_id(&run(&project, None, &["new", &format!("c{n}")], None));
+        run(&project, None, &["close", &id], None);
+        let path = dir.join(format!("closed/{id}.md"));
+        let at = std::time::SystemTime::now() - Duration::from_secs(60 * (12 - n));
+        File::options()
+            .append(true)
+            .open(path)
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
+        closed.push(id);
+    }
+    let complete = |cmd: &str| -> Vec<String> {
+        let o = deeds_cmd(&project, None, &["--", "deeds", cmd, ""])
+            .env("COMPLETE", "fish")
+            .output()
+            .unwrap();
+        let mut ids: Vec<String> = out(&o)
+            .lines()
+            .filter(|l| !l.starts_with('-'))
+            .map(|l| l.split('\t').next().unwrap().to_string())
+            .collect();
+        ids.sort();
+        ids
+    };
+
+    let mut want = closed[2..].to_vec();
+    want.push(open.clone());
+    want.sort();
+    assert_eq!(complete("show"), want);
+    assert_eq!(complete("note"), want);
+    assert_eq!(complete("close"), [open]);
+}

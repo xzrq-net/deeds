@@ -13,7 +13,7 @@ deeds ready              # open issues with no open blockers
 deeds waiting            # what open issues ask of the human (## For you)
 deeds show <id> [--tree] # body + both edge directions
 deeds close <id> -m "…"  # log the outcome, move to closed/
-deeds list / check / gc  # inventory / lint / reap old closed
+deeds list / check       # inventory / lint
 deeds commit             # standalone: commit pending edits
 deeds tui                # browse: blocker tree, ready, recently closed
 ```

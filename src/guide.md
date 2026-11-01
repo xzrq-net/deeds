@@ -96,7 +96,6 @@ deeds show <id>          # body plus blocked-by and blocks; --tree for the DAG
 deeds close <id> -m "…"  # log "Closed: …", move to closed/
 deeds list               # open issues; --closed to include closed
 deeds check              # lint: parse errors, duplicate ids, cycles, unknown blockers
-deeds gc                 # delete issues closed >30 days ago; VCS history retains them
 ```
 
 ## Routing: where writing goes
@@ -135,9 +134,3 @@ deeds gc                 # delete issues closed >30 days ago; VCS history retain
 %end
 - Parallel agents don't pick work independently — whoever spawns them assigns
   specific issues.
-%inline
-- To resurrect a gc'd issue, search VCS history for `.deeds/closed/<id>.md`.
-%standalone
-- To resurrect a gc'd issue, search the tracker's git history for
-  `closed/<id>.md`.
-%end

@@ -59,13 +59,13 @@ sole input to `ready`. Containment collapsed into it: a milestone is an issue
 blocked by its parts, and the rollup tree is the blocker DAG, which is the
 truer picture anyway ("what does finishing this require" includes external
 blockers). relates-to/duplicates/supersedes are markdown links in prose.
-Unknown blocker IDs count as satisfied, with a warning: the referenced issue
-was either GC'd or mistyped, and both are locally visible in `show`.
+Unknown blocker IDs count as satisfied, with a warning: a typo, or an issue
+filed on a branch not merged here, both locally visible in `show`.
 
 **Random 6-char IDs.** Minted with O_EXCL and retry against both open and
-closed namespaces; 30^6 keeps cross-branch collisions and reuse of GC'd IDs
-negligible over a personal tracker's lifetime (~0.1 expected reuses across
-10^4 issues). No sequence counter to
+closed namespaces, so an id is never reused; 30^6 keeps cross-branch
+collisions negligible over a personal tracker's lifetime (~0.1 expected
+across 10^4 issues). No sequence counter to
 conflict on, no hierarchy encoded in the ID (beads' dotted IDs make
 reparenting break identity).
 
@@ -76,15 +76,16 @@ this" is checkable while a numeric urgency scale invites the priority
 inflation models learned from SWEs. Tiers never constrain edges; anything
 may block anything.
 
-**Decay instead of compaction.** Three tiers of retrieval cost, all plain
-text: open issues in `.deeds/`, closed in `closed/` (one step of navigation
-away from a browsing model), GC'd issues in VCS history only (deliberate
-archaeology). `gc` is `rm`, lossless because the repo is the database — which
-assumes closed files have entered history; jj colocation's continuous
-snapshotting makes that automatic, plain git relies on routine commits. `gc`
-keeps closed issues still named by an open issue's `blocked-by`, so live
-edges stay resolvable. The directory layout is the attention policy — the
-hot set stays small and salient without lossy summarization.
+**Closed issues stay, one step away.** Open issues are the tracker's top
+level, closed ones are in `closed/`, one step of navigation away from a
+browsing model; nothing summarizes or deletes them. The directory layout is
+the attention policy — the hot set stays small and salient without lossy
+summarization. A busy tracker closes ~1.5k issues a year, and parsing 10^4
+files is still milliseconds. Where closed issues crowd a human, the views
+cut them: the tui folds them behind a toggle, newest first, and completion
+offers the 10 latest closes, by count rather than age so its candidates
+don't drift with the clock. A `gc` that reaped old closes existed and was
+dropped unused: it cost an edge guard and made unknown blockers ambiguous.
 
 **Pull, not push.** No hooks, no session injection, no settings.json.
 Tracker state never belongs in the prompt; the routing policy does, and it is
@@ -122,7 +123,7 @@ policy. Four surfaces by mutation pattern and reader distance:
 
 | surface       | mutation                 | reader                 | decay            |
 |---------------|--------------------------|------------------------|------------------|
-| tracker       | rewrite body, append log | future session         | close → gc → VCS |
+| tracker       | rewrite body, append log | future session         | close → closed/  |
 | `docs/log.md` | append-only              | the project's readers  | never            |
 | `temp/`       | overwrite freely         | this session           | discarded        |
 | `docs/…`      | edit in place            | anyone, timeless       | never            |

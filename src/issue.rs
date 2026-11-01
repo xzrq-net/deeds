@@ -19,8 +19,8 @@ pub fn tier_name(rank: u8) -> &'static str {
 
 /// Lowercase, no confusables (i l o u / 0 1 excluded).
 pub const ID_ALPHABET: &[u8] = b"abcdefghjkmnpqrstvwxyz23456789";
-// 6 chars: 30^6 = 729M keeps lifetime reuse-after-gc negligible (expected
-// collisions ~0.1 across 10^4 lifetime issues).
+// 6 chars: 30^6 = 729M keeps cross-branch collisions negligible (expected
+// ~0.1 across 10^4 lifetime issues).
 pub const ID_LEN: usize = 6;
 
 #[derive(Debug)]
@@ -268,7 +268,7 @@ fn parse_id_list(value: &str, problems: &mut Vec<String>) -> Vec<String> {
                 problems.push(format!("blocker id wrong length: {token:?}"));
             }
             // Still an edge either way: a textual reference must keep
-            // counting (gc's guard relies on it).
+            // counting.
             ids.push(token.to_string());
         } else {
             problems.push(format!("malformed blocker id: {token:?}"));

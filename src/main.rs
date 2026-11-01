@@ -4,6 +4,7 @@ mod setup;
 mod tui;
 mod vcs;
 
+use std::cmp::Reverse;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{IsTerminal, Read, Write};
@@ -88,11 +89,6 @@ enum Cmd {
     /// duplicate ids across open/closed, blocked-by cycles.
     /// Warnings: missing title, unknown blocker ids (treated as satisfied).
     Check,
-    /// Delete closed issues untouched for --days; history is the archive
-    Gc {
-        #[arg(long, default_value_t = 30)]
-        days: u64,
-    },
     /// Browse issues interactively (for humans)
     Tui,
 }
@@ -134,10 +130,6 @@ fn main() -> Result<()> {
         Cmd::Close { id, message } => {
             let deeds = find_deeds_dir()?;
             mutate(&deeds, || close(&deeds, &id, message.as_deref()))
-        }
-        Cmd::Gc { days } => {
-            let deeds = find_deeds_dir()?;
-            mutate(&deeds, || gc(&deeds, days))
         }
         Cmd::Commit => {
             if let Some(message) = vcs::commit_pending(&find_deeds_dir()?)? {
@@ -222,6 +214,10 @@ fn open_issue_ids(current: &OsStr) -> Vec<CompletionCandidate> {
     issue_ids(current, false)
 }
 
+/// Closed issues offered by completion: the latest closes, by count rather
+/// than age, so the candidates don't change while nothing is closed.
+const COMPLETE_CLOSED: usize = 10;
+
 fn issue_ids(current: &OsStr, with_closed: bool) -> Vec<CompletionCandidate> {
     let Some(prefix) = current.to_str() else {
         return vec![];
@@ -230,9 +226,16 @@ fn issue_ids(current: &OsStr, with_closed: bool) -> Vec<CompletionCandidate> {
     let Ok(issues) = locate().and_then(|(dir, _)| load_all(&dir)) else {
         return vec![];
     };
-    issues
-        .into_iter()
-        .filter(|i| (with_closed || !i.closed) && i.id.starts_with(prefix))
+    let (open, mut closed): (Vec<Issue>, Vec<Issue>) = issues.into_iter().partition(|i| !i.closed);
+    // A closed file's mtime is its close time (`close` stamps it).
+    closed.sort_by_cached_key(|i| {
+        let closed_at = i.path.metadata().and_then(|m| m.modified()).ok();
+        (Reverse(closed_at), i.id.clone())
+    });
+    closed.truncate(if with_closed { COMPLETE_CLOSED } else { 0 });
+    open.into_iter()
+        .chain(closed)
+        .filter(|i| i.id.starts_with(prefix))
         .map(|i| CompletionCandidate::new(i.id).help(Some(i.title.into())))
         .collect()
 }
@@ -256,7 +259,7 @@ fn new(
     let known = Graph::new(&existing);
     for id in blocked_by {
         if !known.by_id.contains_key(id.as_str()) {
-            eprintln!("warning: unknown blocker {id} (gc'd or typo), treated as satisfied");
+            eprintln!("warning: unknown blocker {id}, treated as satisfied");
         }
     }
 
@@ -393,7 +396,7 @@ fn show(id: &str, tree: bool, json: bool) -> Result<()> {
     warn_problems(&issues);
     let g = Graph::new(&issues);
     let Some(&issue) = g.by_id.get(id) else {
-        bail!("no issue {id}; gc'd issues live in VCS history");
+        bail!("no issue {id}");
     };
     warn_unknown(&g, issue);
 
@@ -523,7 +526,8 @@ fn close(deeds: &Path, id: &str, message: Option<&str>) -> Result<()> {
     }
     fs::create_dir_all(deeds.join("closed"))?;
     fs::rename(&issue.path, &dest).with_context(|| format!("move to {}", dest.display()))?;
-    // mtime is gc's "time since close"; a plain rename would keep the old one.
+    // mtime is the close time (tui's recent closes, completion's quota); a
+    // plain rename would keep the old one.
     fs::File::options()
         .append(true)
         .open(&dest)?
@@ -571,7 +575,7 @@ fn check(json: bool) -> Result<()> {
         if !issue.closed {
             for unknown in g.unknown_blockers(issue) {
                 warnings.push(format!(
-                    "{}: unknown blocker {unknown} (gc'd or typo), treated as satisfied",
+                    "{}: unknown blocker {unknown}, treated as satisfied",
                     issue.id
                 ));
             }
@@ -604,44 +608,6 @@ fn check(json: bool) -> Result<()> {
     }
 }
 
-fn gc(deeds: &Path, days: u64) -> Result<()> {
-    let issues = load_all(deeds)?;
-    // The reference guard below reads parsed edges, so parse problems in open
-    // issues could hide a textual reference. Refuse to delete under lints.
-    warn_problems(&issues);
-    if issues
-        .iter()
-        .any(|i| !i.closed && i.problems.iter().any(|p| edge_relevant(p)))
-    {
-        bail!("open issues have lints; run `deeds check` and fix before gc");
-    }
-    // Closed issues still named by an open issue's blocked-by stay resolvable
-    // until the dependent closes or drops the edge.
-    let referenced: std::collections::HashSet<&str> = issues
-        .iter()
-        .filter(|i| !i.closed)
-        .flat_map(|i| i.blocked_by.iter().map(String::as_str))
-        .collect();
-    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86400);
-    let mut reaped = 0;
-    for issue in issues.iter().filter(|i| i.closed) {
-        if issue.path.metadata()?.modified()? >= cutoff {
-            continue;
-        }
-        if referenced.contains(issue.id.as_str()) {
-            println!("kept {} (blocker of an open issue)", issue.id);
-            continue;
-        }
-        fs::remove_file(&issue.path)?;
-        println!("reaped {}", relative(&issue.path));
-        reaped += 1;
-    }
-    if reaped == 0 {
-        println!("nothing to reap");
-    }
-    Ok(())
-}
-
 fn state(issue: &Issue) -> &'static str {
     if issue.closed { "closed" } else { "open" }
 }
@@ -649,7 +615,7 @@ fn state(issue: &Issue) -> &'static str {
 fn warn_unknown(g: &Graph, issue: &Issue) {
     for unknown in g.unknown_blockers(issue) {
         eprintln!(
-            "warning: {}: unknown blocker {unknown} (gc'd or typo), treated as satisfied",
+            "warning: {}: unknown blocker {unknown}, treated as satisfied",
             issue.id
         );
     }
