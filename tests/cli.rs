@@ -327,6 +327,15 @@ fn close_message_is_a_log_entry() {
         )),
         "{text}"
     );
+
+    // Without -m the close is still logged: its date orders recent closes.
+    let id = new_id(&run(&s.0, Some(&dir), &["new", "u"], None));
+    run(&s.0, Some(&dir), &["close", &id], None);
+    let text = fs::read_to_string(dir.join(format!("closed/{id}.md"))).unwrap();
+    assert!(
+        text.ends_with(&format!("- {}: Closed.\n", today())),
+        "{text}"
+    );
 }
 
 #[test]
@@ -360,19 +369,16 @@ fn completion_offers_open_and_the_latest_closes() {
     let dir = s.path("project/.deeds");
     let project = s.0.join("project");
     let open = new_id(&run(&project, None, &["new", "open"], None));
-    // Twelve closed issues, closed a minute apart, oldest first.
+    // Twelve closed issues, closed a day apart, oldest first: their close
+    // entries are rewritten to past dates, as if logged then.
     let mut closed = Vec::new();
-    for n in 0..12u64 {
+    for n in 0..12 {
         let id = new_id(&run(&project, None, &["new", &format!("c{n}")], None));
         run(&project, None, &["close", &id], None);
         let path = dir.join(format!("closed/{id}.md"));
-        let at = std::time::SystemTime::now() - Duration::from_secs(60 * (12 - n));
-        File::options()
-            .append(true)
-            .open(path)
-            .unwrap()
-            .set_modified(at)
-            .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let text = text.replace(&today(), &format!("2026-01-{:02}", n + 1));
+        fs::write(&path, text).unwrap();
         closed.push(id);
     }
     let complete = |cmd: &str| -> Vec<String> {
@@ -394,5 +400,10 @@ fn completion_offers_open_and_the_latest_closes() {
     want.sort();
     assert_eq!(complete("show"), want);
     assert_eq!(complete("note"), want);
-    assert_eq!(complete("close"), [open]);
+    assert_eq!(complete("close"), std::slice::from_ref(&open));
+
+    // A note on an old close brings it back.
+    run(&project, None, &["note", &closed[0]], Some("revisited"));
+    assert!(complete("show").contains(&closed[0]));
+    assert!(!complete("show").contains(&closed[2]));
 }

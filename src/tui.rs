@@ -2,7 +2,6 @@
 //! A viewer for the human; the only write path is handing a file to
 //! $EDITOR. Polls `.deeds/` so edits made elsewhere show up live.
 
-use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::IsTerminal;
@@ -65,8 +64,6 @@ struct App {
     deeds: PathBuf,
     issues: Vec<Issue>,
     index: HashMap<String, usize>,
-    /// For closed issues this is the close time: `close` stamps it.
-    mtimes: Vec<SystemTime>,
     stamp: Vec<(PathBuf, SystemTime, u64)>,
     view: View,
     show_closed: bool,
@@ -88,7 +85,6 @@ impl App {
             deeds,
             issues: vec![],
             index: HashMap::new(),
-            mtimes: vec![],
             stamp: vec![],
             view: View::Tree,
             show_closed: false,
@@ -112,12 +108,6 @@ impl App {
 
     fn set_issues(&mut self, issues: Vec<Issue>) {
         self.issues = issues;
-        self.mtimes = self
-            .issues
-            .iter()
-            .map(|i| i.path.metadata().and_then(|m| m.modified()))
-            .map(|t| t.unwrap_or(SystemTime::UNIX_EPOCH))
-            .collect();
         self.index = self
             .issues
             .iter()
@@ -208,7 +198,11 @@ impl App {
                 let mut closed: Vec<usize> = (0..self.issues.len())
                     .filter(|&n| self.issues[n].closed)
                     .collect();
-                closed.sort_by_key(|&n| Reverse(self.mtimes[n]));
+                // `close` logs, so the last log date is the close date.
+                closed.sort_by(|&a, &b| {
+                    let (a, b) = (&self.issues[a], &self.issues[b]);
+                    b.last_logged.cmp(&a.last_logged).then(a.id.cmp(&b.id))
+                });
                 self.flat_rows(closed)
             }
         }
@@ -743,7 +737,9 @@ impl App {
         spans.push(Span::styled(format!("{glyph} "), glyph_style));
         spans.push(Span::from(format!("{} ", issue.id)));
         if self.view == View::Closed {
-            spans.push(format!("{:>4} ", age(self.mtimes[n])).dark_gray());
+            // MM-DD: the year is noise in a recent-first list.
+            let day = issue.last_logged.as_deref().map_or("     ", |d| &d[5..]);
+            spans.push(format!("{day} ").dark_gray());
         }
         if issue.tier != DEFAULT_TIER {
             spans.push(Span::styled(
@@ -775,7 +771,10 @@ impl App {
         };
         let issue = &self.issues[n];
         let state = if issue.closed {
-            format!("closed {} ago", age(self.mtimes[n])).dark_gray()
+            match &issue.last_logged {
+                Some(date) => format!("closed, last logged {date}").dark_gray(),
+                None => "closed".dark_gray(),
+            }
         } else if g.open_blockers(issue).is_empty() {
             "ready".green()
         } else {
@@ -842,18 +841,6 @@ fn edge_line(label: &str, id: &str, g: &Graph) -> Line<'static> {
     Line::from(spans)
 }
 
-fn age(t: SystemTime) -> String {
-    let secs = SystemTime::now()
-        .duration_since(t)
-        .map_or(0, |d| d.as_secs());
-    match secs {
-        s if s < 3600 => format!("{}m", s / 60),
-        s if s < 86400 => format!("{}h", s / 3600),
-        s => format!("{}d", s / 86400),
-    }
-}
-
-/// Change detector: name, mtime and size of every issue file.
 fn stamp(deeds: &Path) -> Vec<(PathBuf, SystemTime, u64)> {
     let mut out = vec![];
     for dir in [deeds.to_path_buf(), deeds.join("closed")] {

@@ -35,6 +35,9 @@ pub struct Issue {
     /// The body's `## For you` section: what the issue needs from the
     /// human, written for them. None when absent or empty.
     pub for_you: Option<String>,
+    /// The latest date among `## Log` entries (`YYYY-MM-DD`): when the issue
+    /// last moved, and for a closed one, about when it closed.
+    pub last_logged: Option<String>,
     /// Lint findings from parsing; surfaced by `check`, ignored elsewhere.
     pub problems: Vec<String>,
 }
@@ -49,6 +52,7 @@ pub fn parse(id: &str, path: &Path, text: &str, closed: bool) -> Issue {
         path: path.to_path_buf(),
         text: text.to_string(),
         for_you: section(text, FOR_YOU),
+        last_logged: section(text, LOG).and_then(|log| last_logged(&log)),
         problems: vec![],
     };
 
@@ -163,6 +167,25 @@ fn section(text: &str, name: &str) -> Option<String> {
 }
 
 pub const LOG: &str = "Log";
+
+/// The latest entry date in a `## Log` section's text. Entries are
+/// unindented `- YYYY-MM-DD …` items; the latest rather than the last, so a
+/// hand-reordered log still reads right.
+fn last_logged(log: &str) -> Option<String> {
+    log.lines()
+        .filter_map(|line| line.strip_prefix("- ")?.get(..10))
+        .filter(|date| {
+            date.bytes().enumerate().all(|(i, b)| {
+                if i == 4 || i == 7 {
+                    b == b'-'
+                } else {
+                    b.is_ascii_digit()
+                }
+            })
+        })
+        .max()
+        .map(String::from)
+}
 
 /// `text` with `entry` appended to its `## Log`, which ends up the last
 /// section: created if missing, moved to the end if anything follows it.
@@ -488,6 +511,20 @@ mod tests {
             let text = with_log_entry("# T\n", &entry) + "\n## For you\n\ny\n";
             assert_eq!(p(&text).for_you.as_deref(), Some("y"), "{note:?}");
         }
+    }
+
+    #[test]
+    fn last_logged_is_the_latest_entry_date() {
+        let text = "# t\n\n## Log\n\n- 2026-03-02 app@x: b\n  - 2027-01-01 nested\n- 2026-01-05: a\n- not a date\n";
+        let issue = parse("aaaaaa", Path::new("x"), text, false);
+        assert_eq!(issue.last_logged.as_deref(), Some("2026-03-02"));
+        let issue = parse(
+            "aaaaaa",
+            Path::new("x"),
+            "# t\n\n- 2026-03-02 outside\n",
+            false,
+        );
+        assert_eq!(issue.last_logged, None);
     }
 
     #[test]

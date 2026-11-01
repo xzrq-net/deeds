@@ -4,7 +4,6 @@ mod setup;
 mod tui;
 mod vcs;
 
-use std::cmp::Reverse;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{IsTerminal, Read, Write};
@@ -68,11 +67,11 @@ enum Cmd {
         #[arg(long)]
         tree: bool,
     },
-    /// Move to closed/; -m appends an outcome line first
+    /// Log the close (with -m's outcome) and move to closed/
     Close {
         #[arg(add = ArgValueCompleter::new(open_issue_ids))]
         id: String,
-        /// Outcome, appended to the body as "Closed: …"
+        /// Outcome, logged as "Closed: …"
         #[arg(short, long)]
         message: Option<String>,
     },
@@ -214,7 +213,7 @@ fn open_issue_ids(current: &OsStr) -> Vec<CompletionCandidate> {
     issue_ids(current, false)
 }
 
-/// Closed issues offered by completion: the latest closes, by count rather
+/// Closed issues offered by completion: the latest logged, by count rather
 /// than age, so the candidates don't change while nothing is closed.
 const COMPLETE_CLOSED: usize = 10;
 
@@ -227,11 +226,8 @@ fn issue_ids(current: &OsStr, with_closed: bool) -> Vec<CompletionCandidate> {
         return vec![];
     };
     let (open, mut closed): (Vec<Issue>, Vec<Issue>) = issues.into_iter().partition(|i| !i.closed);
-    // A closed file's mtime is its close time (`close` stamps it).
-    closed.sort_by_cached_key(|i| {
-        let closed_at = i.path.metadata().and_then(|m| m.modified()).ok();
-        (Reverse(closed_at), i.id.clone())
-    });
+    // By the last log date, which `close` writes; same-day ties by id.
+    closed.sort_by(|a, b| b.last_logged.cmp(&a.last_logged).then(a.id.cmp(&b.id)));
     closed.truncate(if with_closed { COMPLETE_CLOSED } else { 0 });
     open.into_iter()
         .chain(closed)
@@ -517,21 +513,18 @@ fn close(deeds: &Path, id: &str, message: Option<&str>) -> Result<()> {
         );
     }
 
-    if let Some(msg) = message {
-        append_log(issue, &format!("Closed: {msg}"))?;
-    }
+    // Always logged: the entry's date is the close date (completion, tui).
+    let entry = match message {
+        Some(msg) => format!("Closed: {msg}"),
+        None => "Closed.".to_string(),
+    };
+    append_log(issue, &entry)?;
     let dest = deeds.join("closed").join(format!("{id}.md"));
     if dest.exists() {
         bail!("{} already exists; duplicate id", relative(&dest));
     }
     fs::create_dir_all(deeds.join("closed"))?;
     fs::rename(&issue.path, &dest).with_context(|| format!("move to {}", dest.display()))?;
-    // mtime is the close time (tui's recent closes, completion's quota); a
-    // plain rename would keep the old one.
-    fs::File::options()
-        .append(true)
-        .open(&dest)?
-        .set_modified(std::time::SystemTime::now())?;
     println!("closed {id} -> {}", relative(&dest));
     Ok(())
 }

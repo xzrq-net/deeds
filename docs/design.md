@@ -82,10 +82,13 @@ browsing model; nothing summarizes or deletes them. The directory layout is
 the attention policy — the hot set stays small and salient without lossy
 summarization. A busy tracker closes ~1.5k issues a year, and parsing 10^4
 files is still milliseconds. Where closed issues crowd a human, the views
-cut them: the tui folds them behind a toggle, newest first, and completion
-offers the 10 latest closes, by count rather than age so its candidates
-don't drift with the clock. A `gc` that reaped old closes existed and was
-dropped unused: it cost an edge guard and made unknown blockers ambiguous.
+cut them: the tui folds them behind a toggle, and completion offers only the
+10 latest, by count rather than age so its candidates don't drift with the
+clock. Latest means the last `## Log` date: `close` always logs, so it is
+about the close date, a later note brings an issue back, and it survives
+clones and checkouts, which file times don't. A `gc` that reaped old closes
+existed and was dropped unused: it cost an edge guard and made unknown
+blockers ambiguous.
 
 **Pull, not push.** No hooks, no session injection, no settings.json.
 Tracker state never belongs in the prompt; the routing policy does, and it is
