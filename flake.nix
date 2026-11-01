@@ -22,6 +22,8 @@
 
     deeds = craneLib.buildPackage {
       src = pkgs.lib.cleanSource ./.;
+      # Tests drive git: the standalone tracker autocommits.
+      nativeCheckInputs = [pkgs.git];
       postInstall = ''
         mkdir -p "$out/share/zsh/site-functions"
         COMPLETE=zsh "$out/bin/deeds" > "$out/share/zsh/site-functions/_deeds"

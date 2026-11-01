@@ -1,9 +1,16 @@
 # deeds
 
+%inline
 Work is a graph of markdown files: one issue per file at `.deeds/<id>.md`,
 closed issues at `.deeds/closed/<id>.md`. Location is status; there is no other
-state. The `deeds` CLI answers graph questions; everything else is reading and
-editing files.
+state.
+%standalone
+Work is a graph of markdown files in a tracker outside the project, a git repo
+of its own (`$DEEDS_DIR`): one issue per file at `<id>.md`, closed issues at
+`closed/<id>.md`. Location is status; there is no other state.
+%end
+The `deeds` CLI answers graph questions and writes new issues and log entries;
+everything else is reading and editing files.
 
 ## Issues
 
@@ -17,8 +24,23 @@ tier: nit
 ---
 # Adopt the new config loader
 
-Notes accumulate here as work proceeds.
+The current state: what, why, decisions so far.
+
+## For you
+
+- [ ] Pick the config format.
+
+## Log
+
+- 2026-11-01 app@eng-config: Loader in; the old one stays as a fallback.
 ```
+
+- The body is the current state; rewrite it freely as things change.
+- `## Log` is the last section, append-only. `deeds note` adds dated entries
+  stamped with the checkout they came from. An entry describes a branch's
+  state, so when that work doesn't land, say so in the issue.
+- Write with `deeds new <title> <<'EOF'` and `deeds note <id> <<'EOF'`; edit
+  the file directly to rewrite the body.
 
 A milestone is an ordinary issue blocked by its parts.
 
@@ -69,9 +91,10 @@ Remove completed items from the section and absorb them.
 ```
 deeds ready              # unblocked open issues, tier order — pick from the top
 deeds waiting            # open issues' `## For you` sections: the user's slate
-deeds new <title>        # mint an issue, print its path; edit the file from there
+deeds new <title>        # mint an issue, body from stdin; print its path
+deeds note <id>          # append stdin to its ## Log
 deeds show <id>          # body plus blocked-by and blocks; --tree for the DAG
-deeds close <id> -m "…"  # append "Closed: …", move to closed/
+deeds close <id> -m "…"  # log "Closed: …", move to closed/
 deeds list               # open issues; --closed to include closed
 deeds check              # lint: parse errors, duplicate ids, cycles, unknown blockers
 deeds gc                 # delete issues closed >30 days ago; VCS history retains them
@@ -79,7 +102,12 @@ deeds gc                 # delete issues closed >30 days ago; VCS history retain
 
 ## Routing: where writing goes
 
+%inline
 - `.deeds/` — anything that changes what to do next.
+%standalone
+- The tracker — anything that changes what to do next. The rest below belongs
+  to the project you are working in.
+%end
 - `docs/log.md` — append-only narrative of what happened. The only sanctioned
   home for session-context leaks. When it grows long, graduate to one file per
   entry under `docs/log/`.
@@ -93,7 +121,19 @@ deeds gc                 # delete issues closed >30 days ago; VCS history retain
   self-contained statements, no transcripts, no "as discussed above".
 - File follow-ups the moment you notice them; don't carry them in the
   conversation.
+%inline
 - When to commit `.deeds/` changes is your call.
+%standalone
+- deeds commits the tracker itself, your direct edits included; issues never
+  go in project commits.
+- An issue can't close in the change that did the work: the close note names
+  the project commit (`repo:change-id` when several repos are involved).
+%end
 - Parallel agents don't pick work independently — whoever spawns them assigns
   specific issues.
+%inline
 - To resurrect a gc'd issue, search VCS history for `.deeds/closed/<id>.md`.
+%standalone
+- To resurrect a gc'd issue, search the tracker's git history for
+  `closed/<id>.md`.
+%end

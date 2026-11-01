@@ -33,6 +33,24 @@ changes. The cost — an issue filed on a branch is invisible
 elsewhere until merge — is accepted; trunk-worthy discoveries get filed on
 trunk. No sync mechanism exists because the VCS is the sync mechanism.
 
+**Standalone trackers, by exception.** Issues that are agent context
+rather than project docs, or that span repos, can live in a tracker outside
+any project: `DEEDS_DIR` names it and wins over the walk up from cwd. Such a
+tracker gives up branch-locality, so it can't close an issue in the fixing
+change; close notes name the project commit instead. Being its own repo, it
+commits itself: no hook sees an agent's direct edit, so each write first
+commits what's pending as a snapshot, then its own change with the command
+line as message, under a lock. Boundaries come out loose, which is fine: the
+history is for undo and "what did this say Tuesday". An inline `.deeds/`
+never autocommits; its commits are the agent's call.
+
+**Body is state, log is history.** An issue's body is its current state,
+rewritten freely; `## Log`, always the last section, is append-only, one
+dated list item per `deeds note`, stamped with the checkout it came from
+(`repo@workspace`). A log entry describes a branch's state, which may not
+land; the body says what's true. Heredoc `new` and `note` make a write one
+call, so a standalone tracker gets one commit per write.
+
 **Location is status.** `.deeds/*.md` is open, `.deeds/closed/*.md` is
 closed. No status field, no stored-state-vs-location skew, nothing to lint.
 Timestamps live in VCS history, not frontmatter.
@@ -119,4 +137,4 @@ category, not a fixed layout: projects differ, agents propose.
 
 Multiplayer, roles, claims, memories, mail, compaction, hosted-tracker sync,
 web UI, MCP (the CLI over shell is the agent interface), any state outside
-`.deeds/`.
+the tracker directory.

@@ -769,7 +769,7 @@ impl App {
                 Line::default(),
                 Line::from(format!(
                     "Named as a blocker, but no file has this id: gc'd or a typo. \
-                     Gc'd issues live in VCS history as .deeds/closed/{}.md.",
+                     Gc'd issues live in the tracker's VCS history as closed/{}.md.",
                     row.id
                 )),
             ]);

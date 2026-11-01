@@ -2,10 +2,11 @@ mod graph;
 mod issue;
 mod setup;
 mod tui;
+mod vcs;
 
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -14,7 +15,7 @@ use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 use serde_json::json;
 
 use graph::Graph;
-use issue::{DEFAULT_TIER, Issue, find_deeds_dir, load_all, mint_id, tier_name};
+use issue::{DEFAULT_TIER, Issue, find_deeds_dir, load_all, locate, mint_id, tier_name};
 
 const GUIDE: &str = include_str!("guide.md");
 
@@ -30,11 +31,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Create or refresh .deeds/ and the AGENTS.md block
+    /// Create or refresh .deeds/ and the AGENTS.md block; with DEEDS_DIR
+    /// set, create that tracker and its git repo instead
     Init,
     /// Print the agent guide: workflow, tiers, note routing
     Skill,
-    /// Mint an issue and print its path
+    /// Mint an issue and print its path; the body comes from stdin unless
+    /// it is a terminal
     New {
         /// Title words
         #[arg(required = true)]
@@ -72,6 +75,13 @@ enum Cmd {
         #[arg(short, long)]
         message: Option<String>,
     },
+    /// Append stdin to the issue's `## Log` as a dated, stamped entry
+    Note {
+        #[arg(add = ArgValueCompleter::new(|current: &OsStr| issue_ids(current, true)))]
+        id: String,
+    },
+    /// Commit pending tracker edits; a no-op unless the tracker is its own repo
+    Commit,
     /// Lint the graph; nonzero exit on errors
     ///
     /// Errors: malformed frontmatter, bad tier, malformed blocker ids,
@@ -92,25 +102,120 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let json = cli.json;
     match cli.cmd {
-        Cmd::Init => setup::init(&std::env::current_dir()?),
+        Cmd::Init => match issue::env_deeds_dir()? {
+            Some(dir) => setup::init_standalone(&dir),
+            None => setup::init(&std::env::current_dir()?),
+        },
         Cmd::Skill => {
-            print!("{GUIDE}");
+            print!("{}", guide(standalone()));
             Ok(())
         }
         Cmd::New {
             title,
             blocked_by,
             tier,
-        } => new(&title.join(" "), &blocked_by, tier.as_deref(), json),
+        } => {
+            let deeds = find_deeds_dir()?;
+            // Stdin is read before mutate takes the lock: a writer that never
+            // closes it must not block other calls.
+            let body = stdin_text()?.unwrap_or_default();
+            let title = title.join(" ");
+            mutate(&deeds, || {
+                new(&deeds, &title, &body, &blocked_by, tier.as_deref(), json)
+            })
+        }
+        Cmd::Note { id } => {
+            let deeds = find_deeds_dir()?;
+            let Some(text) = stdin_text()? else {
+                bail!("the note comes from stdin: deeds note {id} <<'EOF'");
+            };
+            mutate(&deeds, || note(&deeds, &id, &text, json))
+        }
+        Cmd::Close { id, message } => {
+            let deeds = find_deeds_dir()?;
+            mutate(&deeds, || close(&deeds, &id, message.as_deref()))
+        }
+        Cmd::Gc { days } => {
+            let deeds = find_deeds_dir()?;
+            mutate(&deeds, || gc(&deeds, days))
+        }
+        Cmd::Commit => {
+            if let Some(message) = vcs::commit_pending(&find_deeds_dir()?)? {
+                println!("{message}");
+            }
+            Ok(())
+        }
+        // Reads don't snapshot: they stay side-effect free and lock-free (the
+        // tui polls, completion runs per keystroke), and pending edits are
+        // committed by the next write or the turn-end `deeds commit`.
         Cmd::Ready => ready(json),
         Cmd::Waiting => waiting(json),
         Cmd::List { closed } => list(closed, json),
         Cmd::Show { id, tree } => show(&id, tree, json),
-        Cmd::Close { id, message } => close(&id, message.as_deref()),
         Cmd::Check => check(json),
-        Cmd::Gc { days } => gc(days),
         Cmd::Tui => tui::run(),
     }
+}
+
+/// Run a write under the tracker's autocommit, if it has one: commit what
+/// is pending, make the change, commit it with the command line as message.
+fn mutate(deeds: &Path, run: impl FnOnce() -> Result<()>) -> Result<()> {
+    let Some(session) = vcs::Autocommit::begin(deeds)? else {
+        return run();
+    };
+    run()?;
+    session.finish(&command_line())
+}
+
+fn command_line() -> String {
+    let quote = |arg: String| {
+        if arg.is_empty() || arg.contains(char::is_whitespace) {
+            format!("\"{arg}\"")
+        } else {
+            arg
+        }
+    };
+    let args: Vec<String> = std::env::args().skip(1).map(quote).collect();
+    format!("deeds {}", args.join(" "))
+}
+
+/// Standalone: the tracker lives outside the project, a repo of its own.
+/// Paths and commit advice both follow `DEEDS_DIR`; one not at a repo root
+/// (which `deeds init` would have made) gets the advice wrong.
+fn standalone() -> bool {
+    std::env::var_os("DEEDS_DIR").is_some_and(|v| !v.is_empty())
+        || locate().is_ok_and(|(dir, _)| vcs::autocommits(&dir))
+}
+
+/// The guide for one mode: lines between `%inline` or `%standalone` and
+/// `%end` belong to that mode only.
+fn guide(standalone: bool) -> String {
+    let mut keep = true;
+    let mut out = String::new();
+    for line in GUIDE.lines() {
+        match line {
+            "%inline" => keep = !standalone,
+            "%standalone" => keep = standalone,
+            "%end" => keep = true,
+            _ if keep => {
+                out += line;
+                out.push('\n');
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Stdin's text, or None when it is a terminal.
+fn stdin_text() -> Result<Option<String>> {
+    let mut stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        return Ok(None);
+    }
+    let mut text = String::new();
+    stdin.read_to_string(&mut text).context("read stdin")?;
+    Ok(Some(text))
 }
 
 fn open_issue_ids(current: &OsStr) -> Vec<CompletionCandidate> {
@@ -122,7 +227,7 @@ fn issue_ids(current: &OsStr, with_closed: bool) -> Vec<CompletionCandidate> {
         return vec![];
     };
     // Completion stays quiet outside a tracker or when its files can't be read.
-    let Ok(issues) = find_deeds_dir().and_then(|dir| load_all(&dir)) else {
+    let Ok(issues) = locate().and_then(|(dir, _)| load_all(&dir)) else {
         return vec![];
     };
     issues
@@ -132,8 +237,14 @@ fn issue_ids(current: &OsStr, with_closed: bool) -> Vec<CompletionCandidate> {
         .collect()
 }
 
-fn new(title: &str, blocked_by: &[String], tier: Option<&str>, json: bool) -> Result<()> {
-    let deeds = find_deeds_dir()?;
+fn new(
+    deeds: &Path,
+    title: &str,
+    body: &str,
+    blocked_by: &[String],
+    tier: Option<&str>,
+    json: bool,
+) -> Result<()> {
     for id in blocked_by {
         if id.len() != issue::ID_LEN || !id.bytes().all(|b| issue::ID_ALPHABET.contains(&b)) {
             bail!("malformed blocker id: {id:?}");
@@ -141,7 +252,7 @@ fn new(title: &str, blocked_by: &[String], tier: Option<&str>, json: bool) -> Re
     }
     // Unknown blockers stay satisfied-with-warning everywhere else; filing
     // time is the cheapest moment to catch the typo.
-    let existing = load_all(&deeds)?;
+    let existing = load_all(deeds)?;
     let known = Graph::new(&existing);
     for id in blocked_by {
         if !known.by_id.contains_key(id.as_str()) {
@@ -158,11 +269,15 @@ fn new(title: &str, blocked_by: &[String], tier: Option<&str>, json: bool) -> Re
     {
         frontmatter += &format!("tier: {t}\n");
     }
-    let body = if frontmatter.is_empty() {
+    let mut text = if frontmatter.is_empty() {
         format!("# {title}\n")
     } else {
         format!("---\n{frontmatter}---\n# {title}\n")
     };
+    let body = body.trim_end().trim_start_matches(['\n', '\r']);
+    if !body.is_empty() {
+        text += &format!("\n{body}\n");
+    }
 
     // O_EXCL retry handles same-dir collisions; closed/ is checked so a
     // closed issue's id is not reused while it is still visible.
@@ -178,7 +293,7 @@ fn new(title: &str, blocked_by: &[String], tier: Option<&str>, json: bool) -> Re
             .open(&path)
         {
             Ok(mut f) => {
-                f.write_all(body.as_bytes())?;
+                f.write_all(text.as_bytes())?;
                 break (id, path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -328,9 +443,51 @@ fn show(id: &str, tree: bool, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn close(id: &str, message: Option<&str>) -> Result<()> {
-    let deeds = find_deeds_dir()?;
-    let issues = load_all(&deeds)?;
+fn note(deeds: &Path, id: &str, text: &str, json: bool) -> Result<()> {
+    if text.trim().is_empty() {
+        bail!("empty note");
+    }
+    let issues = load_all(deeds)?;
+    let Some(issue) = issues.iter().find(|i| i.id == id) else {
+        bail!("no issue {id}");
+    };
+    append_log(issue, text)?;
+    let path = relative(&issue.path);
+    if json {
+        println!("{}", json!({"id": id, "path": path}));
+    } else {
+        println!("{id} {path}");
+    }
+    Ok(())
+}
+
+/// Add a stamped entry to the issue's `## Log`. When the log is already last
+/// this only appends, so an edit made since the issue was read survives.
+fn append_log(issue: &Issue, text: &str) -> Result<()> {
+    let origin = vcs::origin(&std::env::current_dir()?);
+    let entry = issue::log_entry(&vcs::today()?, origin.as_deref(), text);
+    let updated = issue::with_log_entry(&issue.text, &entry);
+    let path = &issue.path;
+    match updated.strip_prefix(issue.text.as_str()) {
+        Some(tail) => fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .and_then(|mut f| f.write_all(tail.as_bytes())),
+        None => {
+            // Moving the log rewrites the file: refuse if it changed since read.
+            let now =
+                fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+            if now != issue.text {
+                bail!("{} changed while being updated; retry", path.display());
+            }
+            fs::write(path, &updated)
+        }
+    }
+    .with_context(|| format!("write {}", path.display()))
+}
+
+fn close(deeds: &Path, id: &str, message: Option<&str>) -> Result<()> {
+    let issues = load_all(deeds)?;
     let g = Graph::new(&issues);
     let Some(&issue) = g.by_id.get(id) else {
         bail!("no issue {id}")
@@ -356,20 +513,7 @@ fn close(id: &str, message: Option<&str>) -> Result<()> {
     }
 
     if let Some(msg) = message {
-        // Append-mode: concurrent edits since load_all are not clobbered.
-        let mut f = fs::OpenOptions::new().append(true).open(&issue.path)?;
-        let lead = if issue.text.ends_with('\n') {
-            "\n"
-        } else {
-            "\n\n"
-        };
-        // Under its own heading if it would land in a `## For you`.
-        let head = if issue::ends_in(&issue.text, issue::FOR_YOU) {
-            "## Closed\n\n"
-        } else {
-            ""
-        };
-        f.write_all(format!("{lead}{head}Closed: {msg}\n").as_bytes())?;
+        append_log(issue, &format!("Closed: {msg}"))?;
     }
     let dest = deeds.join("closed").join(format!("{id}.md"));
     if dest.exists() {
@@ -458,9 +602,8 @@ fn check(json: bool) -> Result<()> {
     }
 }
 
-fn gc(days: u64) -> Result<()> {
-    let deeds = find_deeds_dir()?;
-    let issues = load_all(&deeds)?;
+fn gc(deeds: &Path, days: u64) -> Result<()> {
+    let issues = load_all(deeds)?;
     // The reference guard below reads parsed edges, so parse problems in open
     // issues could hide a textual reference. Refuse to delete under lints.
     warn_problems(&issues);

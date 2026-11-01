@@ -121,7 +121,11 @@ fn headings(text: &str) -> Vec<(usize, usize, &str)> {
             }
             continue;
         }
-        if let Some(c) = ['`', '~'].into_iter().find(|&c| near && run(c) >= 3) {
+        // A ``` line with more backticks after the run is a code span.
+        let opens = |c: char| {
+            near && run(c) >= 3 && (c == '~' || !rest.trim_start_matches(c).contains('`'))
+        };
+        if let Some(c) = ['`', '~'].into_iter().find(|&c| opens(c)) {
             fence = Some((c, run(c)));
             continue;
         }
@@ -158,10 +162,80 @@ fn section(text: &str, name: &str) -> Option<String> {
     (!without_comments(body).trim().is_empty()).then(|| body.to_string())
 }
 
-/// Whether the body's last section is `## <name>`, empty or not: text
-/// appended to the file would land in it.
-pub fn ends_in(text: &str, name: &str) -> bool {
-    headings(text).last().is_some_and(|h| is_section(h, name))
+pub const LOG: &str = "Log";
+
+/// `text` with `entry` appended to its `## Log`, which ends up the last
+/// section: created if missing, moved to the end if anything follows it.
+/// Only the move rewrites; otherwise `text` is a prefix of the result.
+pub fn with_log_entry(text: &str, entry: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let heads = headings(text);
+    let Some(at) = heads.iter().position(|h| is_section(h, LOG)) else {
+        let lead = match text {
+            "" => "",
+            t if t.ends_with("\n\n") => "",
+            t if t.ends_with('\n') => "\n",
+            _ => "\n\n",
+        };
+        return format!("{text}{lead}## {LOG}\n\n{entry}");
+    };
+    if at + 1 == heads.len() {
+        let lead = if text.ends_with('\n') { "" } else { "\n" };
+        return format!("{text}{lead}{entry}");
+    }
+    let start = heads[at].0;
+    let end = heads[at + 1].0;
+    let mut rest = [&lines[..start], &lines[end..]].concat();
+    let mut log = lines[start..end].to_vec();
+    trim_blank_tail(&mut rest);
+    trim_blank_tail(&mut log);
+    if log.len() == 1 {
+        log.push("");
+    }
+    let head = if rest.is_empty() {
+        String::new()
+    } else {
+        rest.join("\n") + "\n\n"
+    };
+    head + &log.join("\n") + "\n" + entry
+}
+
+fn trim_blank_tail(lines: &mut Vec<&str>) {
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+}
+
+/// A `## Log` list item: date, the checkout it came from, then the text,
+/// its later lines indented under the first.
+pub fn log_entry(date: &str, origin: Option<&str>, text: &str) -> String {
+    let stamp = match origin {
+        Some(origin) => format!("{date} {origin}"),
+        None => date.to_string(),
+    };
+    // Leading blank lines go, leading indentation stays: every line shifts
+    // by the same two columns.
+    let text = text.trim_end().trim_start_matches(['\n', '\r']);
+    // A fence opening after the stamp would close on an indented line, which
+    // `headings` reads as a new fence: start such a note on its own line.
+    let first = text.lines().next().unwrap_or_default().trim_start();
+    let mut out = if first.starts_with("```") || first.starts_with("~~~") {
+        format!("- {stamp}:\n")
+    } else {
+        String::new()
+    };
+    let mut lines = text.lines();
+    if out.is_empty() {
+        out = format!("- {stamp}: {}\n", lines.next().unwrap_or_default());
+    }
+    for line in lines {
+        if line.trim().is_empty() {
+            out.push('\n');
+        } else {
+            out += &format!("  {line}\n");
+        }
+    }
+    out
 }
 
 fn without_comments(text: &str) -> String {
@@ -203,16 +277,55 @@ fn parse_id_list(value: &str, problems: &mut Vec<String>) -> Vec<String> {
     ids
 }
 
-/// Locate the tracker by walking up from cwd.
-pub fn find_deeds_dir() -> Result<PathBuf> {
-    let cwd = std::env::current_dir()?;
-    for dir in cwd.ancestors() {
-        let candidate = dir.join(".deeds");
-        if candidate.is_dir() {
-            return Ok(candidate);
-        }
+/// The tracker `DEEDS_DIR` names, if set: an absolute path to the tracker
+/// directory itself.
+pub fn env_deeds_dir() -> Result<Option<PathBuf>> {
+    let Some(dir) = std::env::var_os("DEEDS_DIR").filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    let dir = PathBuf::from(dir);
+    if !dir.is_absolute() {
+        bail!("DEEDS_DIR must be an absolute path: {}", dir.display());
     }
-    bail!("no .deeds directory here or above; run `deeds init`");
+    Ok(Some(dir))
+}
+
+/// The tracker for this process and, when `DEEDS_DIR` overrides it, the
+/// `.deeds/` the walk up from cwd would have found.
+pub fn locate() -> Result<(PathBuf, Option<PathBuf>)> {
+    let cwd = std::env::current_dir()?;
+    let walked = cwd
+        .ancestors()
+        .map(|dir| dir.join(".deeds"))
+        .find(|candidate| candidate.is_dir());
+    let Some(dir) = env_deeds_dir()? else {
+        return match walked {
+            Some(dir) => Ok((dir, None)),
+            None => bail!("no .deeds directory here or above; run `deeds init`"),
+        };
+    };
+    if !dir.is_dir() {
+        bail!(
+            "DEEDS_DIR is not a directory: {}; `deeds init` creates it",
+            dir.display()
+        );
+    }
+    let same = |other: &PathBuf| fs::canonicalize(other).ok() == fs::canonicalize(&dir).ok();
+    let shadowed = walked.filter(|w| !same(w));
+    Ok((dir, shadowed))
+}
+
+/// `locate`, saying on stderr when `DEEDS_DIR` shadows a `.deeds/`.
+pub fn find_deeds_dir() -> Result<PathBuf> {
+    let (dir, shadowed) = locate()?;
+    if let Some(walked) = shadowed {
+        eprintln!(
+            "deeds: using DEEDS_DIR={}, not {}",
+            dir.display(),
+            walked.display()
+        );
+    }
+    Ok(dir)
 }
 
 pub fn load_all(deeds_dir: &Path) -> Result<Vec<Issue>> {
@@ -330,10 +443,64 @@ mod tests {
     }
 
     #[test]
-    fn ends_in_a_section() {
-        assert!(ends_in("# T\n## For you\n\n", FOR_YOU));
-        assert!(!ends_in("# T\n## For you\nx\n## Log\n", FOR_YOU));
-        assert!(!ends_in("# T\n", FOR_YOU));
+    fn log_entries_go_last() {
+        let entry = "- d: x\n";
+        // Created when missing, after a blank line.
+        assert_eq!(
+            with_log_entry("# T\nbody\n", entry),
+            "# T\nbody\n\n## Log\n\n- d: x\n"
+        );
+        // Appended in place when last: the old text is a prefix.
+        let last = "# T\n\n## Log\n\n- d: a\n";
+        assert_eq!(with_log_entry(last, entry), format!("{last}- d: x\n"));
+        // Moved to the end when a section follows it.
+        assert_eq!(
+            with_log_entry("# T\n## Log\n- d: a\n\n## For you\n- [ ] y\n", entry),
+            "# T\n## For you\n- [ ] y\n\n## Log\n- d: a\n- d: x\n"
+        );
+        // A fenced `## Log` is code, not the section.
+        assert_eq!(
+            with_log_entry("# T\n```\n## Log\n```\n", entry),
+            "# T\n```\n## Log\n```\n\n## Log\n\n- d: x\n"
+        );
+    }
+
+    #[test]
+    fn log_entries_append_after_blank_lines() {
+        // Trailing blank lines don't force a rewrite.
+        let last = "# T\n## Log\n- d: a\n\n";
+        assert_eq!(with_log_entry(last, "- d: x\n"), format!("{last}- d: x\n"));
+        assert_eq!(
+            with_log_entry("# T", "- d: x\n"),
+            "# T\n\n## Log\n\n- d: x\n"
+        );
+    }
+
+    #[test]
+    fn fenced_note_keeps_later_headings() {
+        let entry = log_entry("d", None, "```sh\necho\n```");
+        assert_eq!(entry, "- d:\n  ```sh\n  echo\n  ```\n");
+        let text = with_log_entry("# T\n", &entry) + "\n## For you\n\n- [ ] y\n";
+        assert_eq!(p(&text).for_you.as_deref(), Some("- [ ] y"));
+        // Indented fences and one-line code spans stay balanced too.
+        for note in ["  ```\n  x\n  ```", "```code``` span\nmore"] {
+            let entry = log_entry("d", None, note);
+            let text = with_log_entry("# T\n", &entry) + "\n## For you\n\ny\n";
+            assert_eq!(p(&text).for_you.as_deref(), Some("y"), "{note:?}");
+        }
+    }
+
+    #[test]
+    fn log_entry_format() {
+        assert_eq!(
+            log_entry("2026-11-01", Some("app@ws"), "x\n"),
+            "- 2026-11-01 app@ws: x\n"
+        );
+        assert_eq!(log_entry("2026-11-01", None, "x"), "- 2026-11-01: x\n");
+        assert_eq!(
+            log_entry("d", None, "\nfirst\n\n  code\nlast\n\n"),
+            "- d: first\n\n    code\n  last\n"
+        );
     }
 
     #[test]

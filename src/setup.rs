@@ -27,6 +27,17 @@ pub fn init(root: &Path) -> Result<()> {
     remove_legacy_skill(root)
 }
 
+/// `deeds init` with `DEEDS_DIR` set: create that tracker, a git repo of its
+/// own unless it sits inside one. Writes no AGENTS.md block: a standalone
+/// tracker's guide reaches agents some other way (`deeds skill`).
+pub fn init_standalone(dir: &Path) -> Result<()> {
+    if !dir.is_dir() {
+        fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+        println!("initialized {}", dir.display());
+    }
+    crate::vcs::init_repo(dir)
+}
+
 /// Earlier versions installed the guide as a per-repo agent skill; `deeds
 /// skill` replaced it. Remove what init used to write.
 fn remove_legacy_skill(root: &Path) -> Result<()> {
