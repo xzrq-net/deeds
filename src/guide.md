@@ -9,7 +9,7 @@ Work is a graph of markdown files in a tracker outside the project, a git repo
 of its own (`$DEEDS_DIR`): one issue per file at `<id>.md`, closed issues at
 `closed/<id>.md`. Location is status; there is no other state.
 %end
-The `deeds` CLI answers graph questions and writes new issues and log entries;
+The `deeds` CLI answers graph questions, and writes new issues and log entries;
 everything else is reading and editing files.
 
 ## Issues
@@ -37,8 +37,7 @@ The current state: what, why, decisions so far.
 
 - The body is the current state; rewrite it freely as things change.
 - `## Log` is the last section, append-only. `deeds note` adds dated entries
-  stamped with the checkout they came from. An entry describes a branch's
-  state, so when that work doesn't land, say so in the issue.
+  stamped with the checkout they came from.
 - Write with `deeds new <title> <<'EOF'` and `deeds note <id> <<'EOF'`; edit
   the file directly to rewrite the body.
 
@@ -103,13 +102,16 @@ deeds gc                 # delete issues closed >30 days ago; VCS history retain
 ## Routing: where writing goes
 
 %inline
-- `.deeds/` — anything that changes what to do next.
+- `.deeds/` — anything that changes what to do next; an issue's progress goes
+  in its `## Log`.
 %standalone
-- The tracker — anything that changes what to do next. The rest below belongs
-  to the project you are working in.
+- The tracker — anything that changes what to do next; an issue's progress
+  goes in its `## Log`. The rest below belongs to the project you are working
+  in.
 %end
-- `docs/log.md` — append-only narrative of what happened. The only sanctioned
-  home for session-context leaks. When it grows long, graduate to one file per
+- `docs/log.md` — the project's append-only narrative: what happened and why,
+  for its later readers. An issue's `## Log` leaves with the issue; what the
+  project should keep goes here. When it grows long, graduate to one file per
   entry under `docs/log/`.
 - `temp/` — scratch for finishing the current session; disposable.
 - Timeless reference goes under `docs/` — pick or extend a layout that fits the
@@ -122,12 +124,14 @@ deeds gc                 # delete issues closed >30 days ago; VCS history retain
 - File follow-ups the moment you notice them; don't carry them in the
   conversation.
 %inline
-- When to commit `.deeds/` changes is your call.
+- Close an issue in the same VCS change as the work that satisfies it.
 %standalone
 - deeds commits the tracker itself, your direct edits included; issues never
   go in project commits.
 - An issue can't close in the change that did the work: the close note names
   the project commit (`repo:change-id` when several repos are involved).
+- References run one way: the tracker names project commits and files; the
+  project's code, docs and commit messages never name an issue.
 %end
 - Parallel agents don't pick work independently — whoever spawns them assigns
   specific issues.
