@@ -103,7 +103,8 @@ fn err(o: &Output) -> String {
 
 /// `deeds new`'s id.
 fn new_id(o: &Output) -> String {
-    out(o).split_whitespace().next().unwrap().to_string()
+    let path = PathBuf::from(out(o).trim());
+    path.file_stem().unwrap().to_str().unwrap().to_string()
 }
 
 fn today() -> String {

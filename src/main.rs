@@ -305,7 +305,8 @@ fn new(
     if json {
         println!("{}", json!({"id": id, "path": path}));
     } else {
-        println!("{id} {path}");
+        // The id is the file stem; printing it separately would break $(deeds new).
+        println!("{path}");
     }
     Ok(())
 }
@@ -456,7 +457,8 @@ fn note(deeds: &Path, id: &str, text: &str, json: bool) -> Result<()> {
     if json {
         println!("{}", json!({"id": id, "path": path}));
     } else {
-        println!("{id} {path}");
+        // The id is the file stem; printing it separately would break $(deeds new).
+        println!("{path}");
     }
     Ok(())
 }
