@@ -43,8 +43,19 @@ The current state: what, why, decisions so far.
 - The body is the current state; rewrite it freely as things change.
 - `## Log` is the last section, append-only. `deeds note` adds dated entries
   stamped with the checkout they came from.
-- Write with `deeds new <title> <<'EOF'` and `deeds note <id> <<'EOF'`; edit the
-  file directly to rewrite the body.
+- Write with `deeds new <<'EOF'` (the whole file, as above) and
+  `deeds note <id> <<'EOF'`; edit the file directly to rewrite the body.
+
+```
+deeds new <<'EOF'
+---
+tier: nit
+---
+# Adopt the new config loader
+
+The current state: what, why, decisions so far.
+EOF
+```
 
 A milestone is an ordinary issue blocked by its parts.
 
@@ -95,7 +106,7 @@ Remove completed items from the section and absorb them.
 ```
 deeds ready              # unblocked open issues, tier order — pick from the top
 deeds waiting            # open issues' `## For you` sections: the user's slate
-deeds new <title>        # mint an issue, body from stdin; print its path
+deeds new                # mint an issue from the file on stdin; print its path
 deeds note <id>          # append stdin to its ## Log
 deeds show <id>          # body plus blocked-by and blocks; --tree for the DAG
 deeds close <id> -m "…"  # log "Closed: …", move to closed/

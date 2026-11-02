@@ -71,7 +71,7 @@ fn deeds_cmd(cwd: &Path, deeds_dir: Option<&Path>, args: &[&str]) -> Command {
     cmd
 }
 
-/// Run deeds with `stdin` as its input (None: /dev/null), asserting success.
+/// Run deeds with `stdin` as its input (None: empty), asserting success.
 fn run(cwd: &Path, deeds_dir: Option<&Path>, args: &[&str], stdin: Option<&str>) -> Output {
     let out = try_run(cwd, deeds_dir, args, stdin);
     assert!(out.status.success(), "deeds {args:?}: {}", err(&out));
@@ -79,7 +79,12 @@ fn run(cwd: &Path, deeds_dir: Option<&Path>, args: &[&str], stdin: Option<&str>)
 }
 
 fn try_run(cwd: &Path, deeds_dir: Option<&Path>, args: &[&str], stdin: Option<&str>) -> Output {
-    let mut child = deeds_cmd(cwd, deeds_dir, args)
+    feed(deeds_cmd(cwd, deeds_dir, args), stdin)
+}
+
+/// Run `cmd` with `stdin` as its input (None: empty).
+fn feed(mut cmd: Command, stdin: Option<&str>) -> Output {
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -107,6 +112,11 @@ fn new_id(o: &Output) -> String {
     path.file_stem().unwrap().to_str().unwrap().to_string()
 }
 
+/// `deeds new` with `text` as the issue file; its id.
+fn create(cwd: &Path, deeds_dir: Option<&Path>, text: &str) -> String {
+    new_id(&run(cwd, deeds_dir, &["new"], Some(text)))
+}
+
 fn today() -> String {
     let o = Command::new("date").arg("+%F").output().unwrap();
     String::from_utf8(o.stdout).unwrap().trim().to_string()
@@ -127,10 +137,10 @@ fn lookup_prefers_deeds_dir_and_says_so() {
     let sub = s.path("project/src");
     let other = s.path("other");
 
-    let o = run(&sub, None, &["new", "a"], None);
+    let o = run(&sub, None, &["new"], Some("# a\n"));
     assert!(inline.join(format!("{}.md", new_id(&o))).is_file());
 
-    let o = run(&sub, Some(&other), &["new", "b"], None);
+    let o = run(&sub, Some(&other), &["new"], Some("# b\n"));
     assert!(other.join(format!("{}.md", new_id(&o))).is_file());
     let notice = err(&o);
     assert!(
@@ -154,7 +164,7 @@ fn lookup_prefers_deeds_dir_and_says_so() {
 fn any_deeds_dir_is_a_tracker() {
     let s = Scratch::new();
     let bare = s.path("bare");
-    let id = new_id(&run(&s.0, Some(&bare), &["new", "t"], None));
+    let id = create(&s.0, Some(&bare), "# t\n");
     run(&s.0, Some(&bare), &["close", &id], None);
     assert!(bare.join(format!("closed/{id}.md")).is_file());
 }
@@ -173,18 +183,18 @@ fn init_with_deeds_dir_makes_a_repo_and_no_agents_block() {
 fn autocommit_snapshots_then_commits_the_command() {
     let s = Scratch::new();
     let dir = standalone(&s);
-    let a = new_id(&run(&s.0, Some(&dir), &["new", "first", "one"], None));
-    assert_eq!(subjects(&dir), ["deeds new first one"]);
+    let a = create(&s.0, Some(&dir), "# first one\n");
+    assert_eq!(subjects(&dir), ["deeds new: first one"]);
 
     // A direct edit is committed on its own before the next call's change.
     fs::write(dir.join(format!("{a}.md")), "# first one\n\nedited\n").unwrap();
-    let b = new_id(&run(&s.0, Some(&dir), &["new", "second"], None));
+    let b = create(&s.0, Some(&dir), "# second\n");
     assert_eq!(
         subjects(&dir),
         [
-            "deeds new second",
+            "deeds new: second",
             &format!("snapshot: {a}"),
-            "deeds new first one"
+            "deeds new: first one"
         ]
     );
     let snapshot_files = git(&dir, &["show", "--name-only", "--format=", "HEAD~1"]);
@@ -205,7 +215,7 @@ fn inline_tracker_is_not_committed() {
     s.path("project/.deeds");
     git(&project, &["commit", "-q", "--allow-empty", "-m", "base"]);
 
-    run(&project, None, &["new", "t"], None);
+    run(&project, None, &["new"], Some("# t\n"));
     run(&project, None, &["commit"], None);
     assert_eq!(subjects(&project), ["base"]);
     assert!(git(&project, &["status", "--porcelain"]).contains(".deeds/"));
@@ -217,9 +227,9 @@ fn commit_is_just_the_snapshot() {
     let dir = standalone(&s);
     let o = run(&s.0, Some(&dir), &["commit"], None);
     assert_eq!(out(&o), "");
-    let id = new_id(&run(&s.0, Some(&dir), &["new", "t"], None));
+    let id = create(&s.0, Some(&dir), "# t\n");
     run(&s.0, Some(&dir), &["commit"], None);
-    assert_eq!(subjects(&dir), ["deeds new t"]);
+    assert_eq!(subjects(&dir), ["deeds new: t"]);
 
     fs::write(dir.join(format!("{id}.md")), "# t\n\nedited\n").unwrap();
     let o = run(&s.0, Some(&dir), &["commit"], None);
@@ -234,40 +244,119 @@ fn concurrent_calls_wait_for_the_lock() {
     let lock = File::open(dir.join(".git")).unwrap();
     lock.lock().unwrap();
 
-    let mut child = deeds_cmd(&s.0, Some(&dir), &["new", "t"])
-        .stdin(Stdio::null())
+    let mut child = deeds_cmd(&s.0, Some(&dir), &["new"])
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .spawn()
         .unwrap();
+    child.stdin.take().unwrap().write_all(b"# t\n").unwrap();
     std::thread::sleep(Duration::from_millis(500));
     assert!(child.try_wait().unwrap().is_none(), "ran while locked");
     drop(lock);
     assert!(child.wait().unwrap().success());
-    assert_eq!(subjects(&dir), ["deeds new t"]);
+    assert_eq!(subjects(&dir), ["deeds new: t"]);
 }
 
 #[test]
-fn new_reads_its_body_from_stdin() {
+fn new_writes_stdin_as_the_issue_file() {
     let s = Scratch::new();
     let dir = s.path("d");
-    let body = "\nWhat and why.\n\n## For you\n\n- [ ] Decide.\n\n";
-    let id = new_id(&run(&s.0, Some(&dir), &["new", "t"], Some(body)));
-    let text = fs::read_to_string(dir.join(format!("{id}.md"))).unwrap();
+    let blocker = create(&s.0, Some(&dir), "# blocker\n");
+    let text = format!(
+        "---\ntier: nit\nblocked-by: [{blocker}]\nwip: x\n---\n# t\n\nWhat and why.\n\n---\n\n## For you\n\n- [ ] Decide.\n"
+    );
+    let o = run(&s.0, Some(&dir), &["new"], Some(&text));
+    let id = new_id(&o);
+    assert_eq!(out(&o), format!("d/{id}.md\n"));
     assert_eq!(
-        text,
-        "# t\n\nWhat and why.\n\n## For you\n\n- [ ] Decide.\n"
+        fs::read_to_string(dir.join(format!("{id}.md"))).unwrap(),
+        text
     );
 
-    let id = new_id(&run(&s.0, Some(&dir), &["new", "u"], None));
-    let text = fs::read_to_string(dir.join(format!("{id}.md"))).unwrap();
-    assert_eq!(text, "# u\n");
+    let show = |id: &str| -> serde_json::Value {
+        let o = run(&s.0, Some(&dir), &["--json", "show", id], None);
+        serde_json::from_str(&out(&o)).unwrap()
+    };
+    assert_eq!(show(&id)["tier"], "nit");
+    assert_eq!(show(&id)["blocked_by"], serde_json::json!([blocker]));
+    let ready = out(&run(&s.0, Some(&dir), &["ready"], None));
+    assert!(ready.contains(&blocker) && !ready.contains(&id), "{ready}");
+
+    let plain = create(&s.0, Some(&dir), "# u\n\nBody.");
+    let stored = fs::read_to_string(dir.join(format!("{plain}.md"))).unwrap();
+    assert_eq!(stored, "# u\n\nBody.\n");
+    assert_eq!(show(&plain)["tier"], "baseline");
+    assert_eq!(show(&plain)["blocked_by"], serde_json::json!([]));
+
+    let o = try_run(&s.0, Some(&dir), &["new", "a", "title"], None);
+    assert!(!o.status.success());
+}
+
+#[test]
+fn new_refuses_a_bad_file_and_commits_nothing() {
+    let s = Scratch::new();
+    let dir = standalone(&s);
+    let id = create(&s.0, Some(&dir), "# t\n");
+    // Pending edits stay pending: a refusal commits nothing.
+    fs::write(dir.join(format!("{id}.md")), "# t\n\nedited\n").unwrap();
+    for (text, why) in [
+        ("no title, just prose\n", "line 1: expected"),
+        ("\n---\ntier: nit\n---\n# t\n", "line 1: expected"),
+        ("Context first.\n# t\n", "line 1: expected"),
+        ("---\ntier: nit\n---\nprose\n", "no '# Title'"),
+        ("---\ntier: urgent\n---\n# t\n", "line 2: tier"),
+        (
+            "---\ntier: nit\njust prose\n---\n# t\n",
+            "line 3: frontmatter",
+        ),
+        (
+            "---\nblocked-by: [NOPE]\n---\n# t\n",
+            "line 2: malformed blocker",
+        ),
+        ("---\ntier: nit\n# t\n", "line 1: frontmatter"),
+        ("# a\0b\n", "NUL"),
+        ("", "empty"),
+        ("\n  \n", "empty"),
+    ] {
+        let o = try_run(&s.0, Some(&dir), &["new"], Some(text));
+        assert!(!o.status.success(), "{text:?} accepted");
+        assert!(err(&o).contains(why), "{text:?}: {}", err(&o));
+        assert_eq!(out(&o), "");
+    }
+    assert_eq!(subjects(&dir), ["deeds new: t"]);
+    let status = git(&dir, &["status", "--porcelain"]);
+    assert_eq!(status.trim(), format!("M {id}.md"));
+}
+
+#[test]
+fn new_refuses_before_taking_the_lock() {
+    let s = Scratch::new();
+    let dir = standalone(&s);
+    let lock = File::open(dir.join(".git")).unwrap();
+    lock.lock().unwrap();
+    let mut child = deeds_cmd(&s.0, Some(&dir), &["new"])
+        .stdin(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"no title\n")
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let status = child.try_wait().unwrap();
+    drop(lock);
+    let _ = child.kill();
+    assert!(status.is_some_and(|s| !s.success()), "waited on the lock");
 }
 
 #[test]
 fn note_stamps_its_checkout_and_keeps_log_last() {
     let s = Scratch::new();
     let dir = s.path("tracker");
-    let id = new_id(&run(&s.0, Some(&dir), &["new", "t"], Some("Body.\n")));
+    let id = create(&s.0, Some(&dir), "# t\n\nBody.\n");
     let path = dir.join(format!("{id}.md"));
     let date = today();
 
@@ -312,12 +401,7 @@ fn note_stamps_its_checkout_and_keeps_log_last() {
 fn close_message_is_a_log_entry() {
     let s = Scratch::new();
     let dir = s.path("d");
-    let id = new_id(&run(
-        &s.0,
-        Some(&dir),
-        &["new", "t"],
-        Some("## For you\n\n- [ ] x\n"),
-    ));
+    let id = create(&s.0, Some(&dir), "# t\n\n## For you\n\n- [ ] x\n");
     run(&s.0, Some(&dir), &["close", &id, "-m", "shipped"], None);
     let text = fs::read_to_string(dir.join(format!("closed/{id}.md"))).unwrap();
     assert!(
@@ -329,7 +413,7 @@ fn close_message_is_a_log_entry() {
     );
 
     // Without -m the close is still logged: its date orders recent closes.
-    let id = new_id(&run(&s.0, Some(&dir), &["new", "u"], None));
+    let id = create(&s.0, Some(&dir), "# u\n");
     run(&s.0, Some(&dir), &["close", &id], None);
     let text = fs::read_to_string(dir.join(format!("closed/{id}.md"))).unwrap();
     assert!(
@@ -344,14 +428,12 @@ fn autocommit_ignores_an_inherited_git_repo() {
     let dir = standalone(&s);
     let other = s.path("other");
     git(&other, &["init", "-q"]);
-    let o = deeds_cmd(&s.0, Some(&dir), &["new", "t"])
-        .env("GIT_DIR", other.join(".git"))
-        .env("GIT_OBJECT_DIRECTORY", other.join(".git/objects"))
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
+    let mut cmd = deeds_cmd(&s.0, Some(&dir), &["new"]);
+    cmd.env("GIT_DIR", other.join(".git"))
+        .env("GIT_OBJECT_DIRECTORY", other.join(".git/objects"));
+    let o = feed(cmd, Some("# t\n"));
     assert!(o.status.success(), "{}", err(&o));
-    assert_eq!(subjects(&dir), ["deeds new t"]);
+    assert_eq!(subjects(&dir), ["deeds new: t"]);
 }
 
 #[test]
@@ -393,12 +475,12 @@ fn completion_offers_open_and_the_latest_closes() {
     let s = Scratch::new();
     let dir = s.path("project/.deeds");
     let project = s.0.join("project");
-    let open = new_id(&run(&project, None, &["new", "open"], None));
+    let open = create(&project, None, "# open\n");
     // Twelve closed issues, closed a day apart, oldest first: their close
     // entries are rewritten to past dates, as if logged then.
     let mut closed = Vec::new();
     for n in 0..12 {
-        let id = new_id(&run(&project, None, &["new", &format!("c{n}")], None));
+        let id = create(&project, None, &format!("# c{n}\n"));
         run(&project, None, &["close", &id], None);
         let path = dir.join(format!("closed/{id}.md"));
         let text = fs::read_to_string(&path).unwrap();

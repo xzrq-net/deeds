@@ -36,20 +36,9 @@ enum Cmd {
     Init,
     /// Print the agent guide: workflow, tiers, note routing
     Skill,
-    /// Mint an issue and print its path; the body comes from stdin unless
-    /// it is a terminal
-    New {
-        /// Title words
-        #[arg(required = true)]
-        title: Vec<String>,
-        /// Blocker ids
-        #[arg(short, long = "blocked-by", value_delimiter = ',')]
-        #[arg(add = ArgValueCompleter::new(open_issue_ids))]
-        blocked_by: Vec<String>,
-        /// Attention tier; default baseline
-        #[arg(short, long, value_parser = clap::builder::PossibleValuesParser::new(issue::TIERS))]
-        tier: Option<String>,
-    },
+    /// Mint an issue from the file on stdin (frontmatter, `# Title`, body,
+    /// as stored) and print its path
+    New,
     /// Open issues with no open blockers
     Ready,
     /// What open issues ask of the human: their `## For you` sections
@@ -114,30 +103,30 @@ fn main() -> Result<()> {
             print!("{}", guide(standalone(&deeds)));
             Ok(())
         }
-        Cmd::New {
-            title,
-            blocked_by,
-            tier,
-        } => {
+        Cmd::New => {
             let deeds = find_deeds_dir()?;
             // Stdin is read before mutate takes the lock: a writer that never
             // closes it must not block other calls.
-            let body = stdin_text()?.unwrap_or_default();
-            let title = title.join(" ");
-            mutate(&deeds, || {
-                new(&deeds, &title, &body, &blocked_by, tier.as_deref(), json)
-            })
+            let Some(text) = stdin_text()? else {
+                bail!("pipe the issue in: deeds new <<'EOF'");
+            };
+            // Refused input must not reach mutate, whose snapshot commits.
+            let issue = new_issue(&text)?;
+            let message = format!("deeds new: {}", issue.title);
+            mutate(&deeds, &message, || new(&deeds, &issue))
         }
         Cmd::Note { id } => {
             let deeds = find_deeds_dir()?;
             let Some(text) = stdin_text()? else {
                 bail!("the note comes from stdin: deeds note {id} <<'EOF'");
             };
-            mutate(&deeds, || note(&deeds, &id, &text, json))
+            mutate(&deeds, &command_line(), || note(&deeds, &id, &text, json))
         }
         Cmd::Close { id, message } => {
             let deeds = find_deeds_dir()?;
-            mutate(&deeds, || close(&deeds, &id, message.as_deref()))
+            mutate(&deeds, &command_line(), || {
+                close(&deeds, &id, message.as_deref())
+            })
         }
         Cmd::Commit => {
             if let Some(message) = vcs::commit_pending(&find_deeds_dir()?)? {
@@ -158,13 +147,13 @@ fn main() -> Result<()> {
 }
 
 /// Run a write under the tracker's autocommit, if it has one: commit what
-/// is pending, make the change, commit it with the command line as message.
-fn mutate(deeds: &Path, run: impl FnOnce() -> Result<()>) -> Result<()> {
+/// is pending, make the change, commit it with `message`.
+fn mutate(deeds: &Path, message: &str, run: impl FnOnce() -> Result<()>) -> Result<()> {
     let Some(session) = vcs::Autocommit::begin(deeds)? else {
         return run();
     };
     run()?;
-    session.finish(&command_line())
+    session.finish(message)
 }
 
 fn command_line() -> String {
@@ -255,51 +244,48 @@ fn issue_ids(current: &OsStr, with_closed: bool) -> Vec<CompletionCandidate> {
         .collect()
 }
 
-fn new(
-    deeds: &Path,
-    title: &str,
-    body: &str,
-    blocked_by: &[String],
-    tier: Option<&str>,
-    json: bool,
-) -> Result<()> {
-    for id in blocked_by {
-        if id.len() != issue::ID_LEN || !id.bytes().all(|b| issue::ID_ALPHABET.contains(&b)) {
-            bail!("malformed blocker id: {id:?}");
-        }
+/// The issue `new` would write, refused on any problem `check` would
+/// report for it, a missing title included.
+fn new_issue(text: &str) -> Result<Issue> {
+    if text.trim().is_empty() {
+        bail!("empty stdin: pipe the issue in, `# Title` first");
     }
+    // A NUL would fail git's commit message after the file is written.
+    if text.contains('\0') {
+        bail!("stdin holds a NUL byte");
+    }
+    let text = if text.ends_with('\n') {
+        text.to_string()
+    } else {
+        format!("{text}\n")
+    };
+    // check lets prose precede the title, so a stray first line would turn
+    // the frontmatter below it into body text without a word.
+    let first = text.lines().next().unwrap_or_default();
+    if first.trim() != "---" && !first.starts_with("# ") {
+        bail!("stdin refused: line 1: expected `---` (frontmatter) or `# Title`, got {first:?}");
+    }
+    let issue = issue::parse("new", Path::new(""), &text, false);
+    if !issue.problems.is_empty() {
+        bail!("stdin refused: {}", issue.problems.join("; "));
+    }
+    Ok(issue)
+}
+
+fn new(deeds: &Path, issue: &Issue) -> Result<()> {
     // Unknown blockers stay satisfied-with-warning everywhere else; filing
     // time is the cheapest moment to catch the typo.
     let existing = load_all(deeds)?;
     let known = Graph::new(&existing);
-    for id in blocked_by {
+    for id in &issue.blocked_by {
         if !known.by_id.contains_key(id.as_str()) {
             eprintln!("warning: unknown blocker {id}, treated as satisfied");
         }
     }
 
-    let mut frontmatter = String::new();
-    if !blocked_by.is_empty() {
-        frontmatter += &format!("blocked-by: [{}]\n", blocked_by.join(", "));
-    }
-    if let Some(t) = tier
-        && t != tier_name(DEFAULT_TIER)
-    {
-        frontmatter += &format!("tier: {t}\n");
-    }
-    let mut text = if frontmatter.is_empty() {
-        format!("# {title}\n")
-    } else {
-        format!("---\n{frontmatter}---\n# {title}\n")
-    };
-    let body = body.trim_end().trim_start_matches(['\n', '\r']);
-    if !body.is_empty() {
-        text += &format!("\n{body}\n");
-    }
-
     // O_EXCL retry handles same-dir collisions; closed/ is checked so a
     // closed issue's id is not reused while it is still visible.
-    let (id, path) = loop {
+    let path = loop {
         let id = mint_id();
         let path = deeds.join(format!("{id}.md"));
         if deeds.join("closed").join(format!("{id}.md")).exists() {
@@ -311,21 +297,15 @@ fn new(
             .open(&path)
         {
             Ok(mut f) => {
-                f.write_all(text.as_bytes())?;
-                break (id, path);
+                f.write_all(issue.text.as_bytes())?;
+                break path;
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e).with_context(|| format!("create {}", path.display())),
         }
     };
-
-    let path = relative(&path);
-    if json {
-        println!("{}", json!({"id": id, "path": path}));
-    } else {
-        // The id is the file stem; printing it separately would break $(deeds new).
-        println!("{path}");
-    }
+    // The id is the file stem; printing it separately would break $(deeds new).
+    println!("{}", relative(&path));
     Ok(())
 }
 

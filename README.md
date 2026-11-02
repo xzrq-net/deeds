@@ -7,7 +7,7 @@ the archive. See `docs/design.md` for rationale.
 ```
 deeds init               # .deeds/ + AGENTS.md block; rerun to refresh
 deeds skill              # print the agent guide; fails with no tracker
-deeds new <title>        # mint an issue (body from stdin), print its path
+deeds new                # mint an issue from the file on stdin, print its path
 deeds note <id>          # append stdin to the issue's ## Log, dated
 deeds ready              # open issues with no open blockers
 deeds waiting            # what open issues ask of the human (## For you)
@@ -27,7 +27,8 @@ Standalone trackers live outside any project, in a git repo of their own:
 `DEEDS_DIR=/abs/path deeds init` creates one, and with `DEEDS_DIR` set every
 call uses it over any `.deeds/` (saying so on stderr). A tracker that is the
 root of its own repo commits itself: each write first commits pending direct
-edits as a snapshot, then its change with the command line as message;
-`deeds commit` does just the snapshot. `deeds skill` adapts to the mode.
+edits as a snapshot, then its change with the command line (for `new`, plus
+the title) as message; `deeds commit` does just the snapshot. `deeds skill`
+adapts to the mode.
 
 Build: `nix build`, or `cargo build` in the devshell.

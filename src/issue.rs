@@ -56,48 +56,51 @@ pub fn parse(id: &str, path: &Path, text: &str, closed: bool) -> Issue {
         problems: vec![],
     };
 
-    let mut lines = text.lines().peekable();
-    if lines.peek().map(|l| l.trim()) == Some("---") {
+    // Problems found on a line name it, 1-based, so `new` and `check` can
+    // point at the fix.
+    let mut lines = text.lines().enumerate().map(|(n, l)| (n + 1, l)).peekable();
+    if lines.peek().map(|(_, l)| l.trim()) == Some("---") {
         lines.next();
         let mut terminated = false;
-        for line in lines.by_ref() {
+        for (n, line) in lines.by_ref() {
             if line.trim() == "---" {
                 terminated = true;
                 break;
             }
-            let Some((key, value)) = line.split_once(':') else {
-                if !line.trim().is_empty() {
-                    issue
-                        .problems
-                        .push(format!("frontmatter line without ':': {line:?}"));
-                }
-                continue;
-            };
-            match key.trim() {
-                // Repeated keys extend rather than replace: a merge that
-                // leaves two blocked-by lines must not drop edges.
-                "blocked-by" | "blocked_by" => {
-                    let ids = parse_id_list(value, &mut issue.problems);
-                    issue.blocked_by.extend(ids);
-                }
-                "tier" => match tier_rank(value.trim()) {
-                    Some(r) => issue.tier = r,
-                    None => issue.problems.push(format!(
-                        "tier not one of {}: {:?}",
-                        TIERS.join("/"),
-                        value.trim()
-                    )),
+            let mut found = vec![];
+            match line.split_once(':') {
+                None if line.trim().is_empty() => {}
+                None => found.push(format!("frontmatter line without ':': {line:?}")),
+                Some((key, value)) => match key.trim() {
+                    // Repeated keys extend rather than replace: a merge that
+                    // leaves two blocked-by lines must not drop edges.
+                    "blocked-by" | "blocked_by" => {
+                        let ids = parse_id_list(value, &mut found);
+                        issue.blocked_by.extend(ids);
+                    }
+                    "tier" => match tier_rank(value.trim()) {
+                        Some(r) => issue.tier = r,
+                        None => found.push(format!(
+                            "tier not one of {}: {:?}",
+                            TIERS.join("/"),
+                            value.trim()
+                        )),
+                    },
+                    // Unknown keys are advisory (wip: etc.) and carry no semantics.
+                    _ => {}
                 },
-                // Unknown keys are advisory (wip: etc.) and carry no semantics.
-                _ => {}
             }
+            let found = found.into_iter().map(|p| format!("line {n}: {p}"));
+            issue.problems.extend(found);
         }
         if !terminated {
-            issue.problems.push("unterminated frontmatter".into());
+            issue
+                .problems
+                .push("line 1: frontmatter opened here is never closed".into());
         }
     }
 
-    match lines.find_map(|l| l.strip_prefix("# ")) {
+    match lines.find_map(|(_, l)| l.strip_prefix("# ")) {
         Some(t) if !t.trim().is_empty() => issue.title = t.trim().to_string(),
         _ => {
             issue.title = id.to_string();
@@ -545,7 +548,12 @@ mod tests {
         let i = p("---\ntier: p1\nblocked-by: [BAD!]\n# no terminator\n");
         assert!(i.problems.iter().any(|p| p.contains("tier")));
         assert!(i.problems.iter().any(|p| p.contains("malformed blocker")));
-        assert!(i.problems.iter().any(|p| p.contains("unterminated")));
+        assert!(
+            i.problems
+                .iter()
+                .any(|p| p == "line 1: frontmatter opened here is never closed")
+        );
+        assert!(i.problems.iter().any(|p| p.starts_with("line 2: tier")));
         assert!(i.problems.iter().any(|p| p.contains("no '# Title'")));
     }
 }
