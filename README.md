@@ -6,7 +6,7 @@ the archive. See `docs/design.md` for rationale.
 
 ```
 deeds init               # .deeds/ + AGENTS.md block; rerun to refresh
-deeds skill              # print the agent guide
+deeds skill              # print the agent guide; fails with no tracker
 deeds new <title>        # mint an issue (body from stdin), print its path
 deeds note <id>          # append stdin to the issue's ## Log, dated
 deeds ready              # open issues with no open blockers

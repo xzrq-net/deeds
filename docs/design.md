@@ -91,10 +91,12 @@ existed and was dropped unused: it cost an edge guard and made unknown
 blockers ambiguous.
 
 **Pull, not push.** No hooks, no session injection, no settings.json.
-Tracker state never belongs in the prompt; the routing policy does, and it is
-static: a short markered block upserted into AGENTS.md points at `deeds skill`,
-which prints the guide compiled into the binary. Two tiers with different
-content — trigger vs. policy — and no per-repo copy of the policy, so there is
+Tracker state never belongs in the prompt; the routing policy does, and it
+is static: a short markered block upserted into AGENTS.md points at
+`deeds skill`, which prints the guide compiled into the binary, worded for the
+tracker's mode, and refuses where there is no tracker: the answer to "is
+deeds in use here" is the command failing. Two tiers with different content
+— trigger vs. policy — and no per-repo copy of the policy, so there is
 nothing to drift. Beads pushes context at SessionStart, which is the root of
 its five-copies-of-instructions sprawl: hooks per tool, fallback blocks for
 when hooks fail, skills for tools without hooks, dedup between the layers.

@@ -102,7 +102,16 @@ fn main() -> Result<()> {
             None => setup::init(&std::env::current_dir()?),
         },
         Cmd::Skill => {
-            print!("{}", guide(standalone()));
+            // No tracker, no policy: an agent asking here learns deeds isn't
+            // in use, rather than reading a guide for a tracker that isn't
+            // there. Not "run `deeds init`": that's the user's call.
+            let deeds = find_deeds_dir().map_err(|e| match issue::env_deeds_dir() {
+                Ok(None) => {
+                    anyhow::anyhow!("no tracker: no .deeds/ here or above, and no DEEDS_DIR")
+                }
+                _ => e,
+            })?;
+            print!("{}", guide(standalone(&deeds)));
             Ok(())
         }
         Cmd::New {
@@ -173,9 +182,8 @@ fn command_line() -> String {
 /// Standalone: the tracker lives outside the project, a repo of its own.
 /// Paths and commit advice both follow `DEEDS_DIR`; one not at a repo root
 /// (which `deeds init` would have made) gets the advice wrong.
-fn standalone() -> bool {
-    std::env::var_os("DEEDS_DIR").is_some_and(|v| !v.is_empty())
-        || locate().is_ok_and(|(dir, _)| vcs::autocommits(&dir))
+fn standalone(deeds: &Path) -> bool {
+    std::env::var_os("DEEDS_DIR").is_some_and(|v| !v.is_empty()) || vcs::autocommits(deeds)
 }
 
 /// The guide for one mode: blocks between `<!-- inline -->` or

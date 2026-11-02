@@ -359,8 +359,33 @@ fn skill_follows_the_mode() {
     let s = Scratch::new();
     let inline = out(&run(&s.path("p/.deeds"), None, &["skill"], None));
     assert!(inline.contains(".deeds/closed/") && !inline.contains("$DEEDS_DIR"));
-    let text = out(&run(&s.0, Some(&s.0.join("not-yet")), &["skill"], None));
+    let dir = standalone(&s);
+    let text = out(&run(&s.0, Some(&dir), &["skill"], None));
     assert!(text.contains("deeds commits the tracker itself") && !text.contains(".deeds/"));
+}
+
+#[test]
+fn skill_refuses_without_a_tracker() {
+    let s = Scratch::new();
+    let o = try_run(&s.path("bare"), None, &["skill"], None);
+    assert!(!o.status.success() && out(&o).is_empty());
+    assert!(
+        err(&o).contains("no tracker") && !err(&o).contains("init"),
+        "{}",
+        err(&o)
+    );
+    // A DEEDS_DIR that isn't made yet is no tracker either.
+    let o = try_run(
+        &s.path("bare"),
+        Some(&s.0.join("not-yet")),
+        &["skill"],
+        None,
+    );
+    assert!(
+        !o.status.success() && err(&o).contains("deeds init"),
+        "{}",
+        err(&o)
+    );
 }
 
 #[test]
