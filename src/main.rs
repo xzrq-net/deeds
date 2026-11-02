@@ -178,21 +178,32 @@ fn standalone() -> bool {
         || locate().is_ok_and(|(dir, _)| vcs::autocommits(&dir))
 }
 
-/// The guide for one mode: lines between `%inline` or `%standalone` and
-/// `%end` belong to that mode only.
+/// The guide for one mode: blocks between `<!-- inline -->` or
+/// `<!-- standalone -->` and `<!-- end -->` belong to that mode only. The
+/// markers are HTML comments so markdown formatters leave them on their own
+/// lines; they want a blank line on each side, so the blank after a marker
+/// goes with it.
 fn guide(standalone: bool) -> String {
     let mut keep = true;
+    let mut after_marker = false;
     let mut out = String::new();
     for line in GUIDE.lines() {
-        match line {
-            "%inline" => keep = !standalone,
-            "%standalone" => keep = standalone,
-            "%end" => keep = true,
-            _ if keep => {
-                out += line;
-                out.push('\n');
-            }
-            _ => {}
+        let marker = match line.trim() {
+            "<!-- inline -->" => Some(!standalone),
+            "<!-- standalone -->" => Some(standalone),
+            "<!-- end -->" => Some(true),
+            _ => None,
+        };
+        if let Some(mode_keeps) = marker {
+            keep = mode_keeps;
+            after_marker = true;
+            continue;
+        }
+        let skip = after_marker && line.trim().is_empty();
+        after_marker = false;
+        if keep && !skip {
+            out += line;
+            out.push('\n');
         }
     }
     out
@@ -675,4 +686,18 @@ fn relative(path: &Path) -> String {
         .unwrap_or(path)
         .display()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::guide;
+
+    #[test]
+    fn guide_drops_markers_and_their_blank_lines() {
+        for standalone in [false, true] {
+            let text = guide(standalone);
+            assert!(!text.contains("<!-- "), "{text}");
+            assert!(!text.contains("\n\n\n"), "{text}");
+        }
+    }
 }
