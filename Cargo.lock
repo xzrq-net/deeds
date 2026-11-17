@@ -262,6 +262,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "fastrand",
+ "libc",
  "ratatui",
  "serde_json",
 ]

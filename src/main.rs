@@ -85,6 +85,10 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
+    // A reader that stops early (`deeds list | head`) ends deeds quietly:
+    // Rust starts with SIGPIPE ignored, and `println!` panics on the error
+    // a write then gets.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     CompleteEnv::with_factory(Cli::command).complete();
     let cli = Cli::parse();
     let json = cli.json;

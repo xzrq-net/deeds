@@ -593,3 +593,21 @@ fn completion_offers_open_and_the_latest_closes() {
     assert!(complete("show").contains(&closed[0]));
     assert!(!complete("show").contains(&closed[2]));
 }
+
+#[test]
+fn a_reader_that_left_ends_deeds_without_a_panic() {
+    use std::os::unix::process::ExitStatusExt;
+    let s = Scratch::new();
+    let dir = standalone(&s);
+    create(&s.0, Some(&dir), "# One\n");
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let o = deeds_cmd(&s.0, Some(&dir), &["list"])
+        .stdin(Stdio::null())
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(o.status.signal(), Some(libc::SIGPIPE), "{}", err(&o));
+    assert_eq!(err(&o), "");
+}
