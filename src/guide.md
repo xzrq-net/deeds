@@ -92,14 +92,31 @@ Remove completed items from the section and absorb them.
     issue.
   - Organizational: milestones and epics are issues blocked by their parts —
     split as parts become clear, not up front.
-  - Attention saver: I noticed this unrelated thing, I filed it as an issue, I
-    don't have to think about it anymore. A later context can consolidate.
 - Filing autonomy follows clarity of scope: if you can state it in the title,
   file it without asking. Fuzzy or strategic scope, or a pile of related
   findings — ask first.
 - Harness task lists and `temp/` notes are disposable intra-session state;
   anything durable gets spilled to issues or docs so progress can't slip
   backward.
+
+## Untriaged
+
+What you notice outside the task at hand (a smell, a flaky test, an idea) is
+jotted, not filed: whether it matters is judged later, at triage.
+
+```
+deeds jot <<'EOF'
+src/store.rs:412 reads the row twice; the second read can see a later write.
+EOF
+```
+
+`jot` appends a dated entry to `untriaged.md`, beside the open issues. Nothing
+picks work from that file; `ready` shows its size and age.
+
+Triage is a deliberate pass over the whole list, when the user asks for one;
+suggest one when the list looks long or old. Each entry is fixed, filed, added
+to an existing issue, or dropped. The file ends empty, and the user hears what
+became of the batch.
 
 ## Commands
 
@@ -108,6 +125,7 @@ deeds ready              # unblocked open issues, tier order — pick from the t
 deeds waiting            # open issues' `## For you` sections: the user's slate
 deeds new                # mint an issue from the file on stdin; print its path
 deeds note <id>          # append stdin to its ## Log
+deeds jot                # append stdin to the untriaged list
 deeds show <id>          # body plus blocked-by and blocks; --tree for the DAG
 deeds close <id> -m "…"  # log "Closed: …", move to closed/
 deeds list               # open issues; --closed to include closed
@@ -140,8 +158,8 @@ deeds check              # lint: parse errors, duplicate ids, cycles, unknown bl
 
 - Issue bodies are working notes for a future reader with zero session context:
   self-contained statements, no transcripts, no "as discussed above".
-- File follow-ups the moment you notice them; don't carry them in the
-  conversation.
+- File what the work needs and jot what you merely noticed, the moment it comes
+  up; don't carry either in the conversation.
 
 <!-- inline -->
 

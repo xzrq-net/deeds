@@ -9,7 +9,8 @@ deeds init               # .deeds/ + AGENTS.md block; rerun to refresh
 deeds skill              # print the agent guide; fails with no tracker
 deeds new                # mint an issue from the file on stdin, print its path
 deeds note <id>          # append stdin to the issue's ## Log, dated
-deeds ready              # open issues with no open blockers
+deeds jot                # append stdin to the untriaged list, dated
+deeds ready              # open issues with no open blockers, then a line of counts
 deeds waiting            # what open issues ask of the human (## For you)
 deeds show <id> [--tree] # body + both edge directions
 deeds close <id> -m "…"  # log the outcome, move to closed/
@@ -22,6 +23,10 @@ Issues are markdown with optional frontmatter (`blocked-by: [id, …]`,
 `tier: objective|baseline|nit|freezer`). Location is status: `.deeds/*.md`
 open, `.deeds/closed/*.md` closed. One edge type; a milestone is an issue
 blocked by its parts. Query commands take a global `--json`.
+
+`.deeds/untriaged.md` is not an issue: it holds what was noticed and not yet
+judged, one dated entry per `deeds jot`, until a triage empties it. `ready`
+ends with its count and age.
 
 Standalone trackers live outside any project, in a git repo of their own:
 `DEEDS_DIR=/abs/path deeds init` creates one, and with `DEEDS_DIR` set every

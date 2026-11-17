@@ -398,6 +398,85 @@ fn note_stamps_its_checkout_and_keeps_log_last() {
 }
 
 #[test]
+fn jot_appends_to_the_untriaged_list_which_is_no_issue() {
+    let s = Scratch::new();
+    let dir = standalone(&s);
+    let id = create(&s.0, Some(&dir), "# t\n\nBody.\n");
+    let date = today();
+    let ready = || out(&run(&s.0, Some(&dir), &["ready"], None));
+    assert!(
+        ready().ends_with(
+            "1 open, 0 blocked, 0 waiting on you · 0 closed in the past week · nothing untriaged\n"
+        ),
+        "{}",
+        ready()
+    );
+
+    let proj = s.path("proj");
+    git(&proj, &["init", "-q"]);
+    git(&proj, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    let o = run(
+        &proj,
+        Some(&dir),
+        &["jot"],
+        Some("src/a.rs:10 reads twice\n\nMaybe a race.\n"),
+    );
+    let path = dir.join("untriaged.md");
+    assert_eq!(PathBuf::from(out(&o).trim()), path);
+    // A hand edit that left no final newline: the next entry starts its own line.
+    let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+    f.write_all(b"- by hand").unwrap();
+    run(&s.0, Some(&dir), &["jot"], Some("second"));
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        format!(
+            "- {date} proj: src/a.rs:10 reads twice\n\n  Maybe a race.\n\
+             - by hand\n- {date}: second\n"
+        )
+    );
+    // Its own commit in a tracker that commits itself, the hand edit before it.
+    assert_eq!(
+        subjects(&dir)[..3],
+        ["deeds jot", "snapshot: untriaged", "deeds jot"]
+    );
+
+    // Counted in ready's summary, and nowhere an issue.
+    assert!(
+        ready().ends_with("· 3 untriaged, oldest today\n"),
+        "{}",
+        ready()
+    );
+    let listed = out(&run(&s.0, Some(&dir), &["list", "--closed"], None));
+    assert!(
+        listed.contains(&id) && !listed.contains("untriaged"),
+        "{listed}"
+    );
+    let o = run(&s.0, Some(&dir), &["check"], None);
+    assert!(!out(&o).contains("untriaged") && !err(&o).contains("untriaged"));
+    let rows = out(&run(&s.0, Some(&dir), &["--json", "ready"], None));
+    let rows: serde_json::Value = serde_json::from_str(&rows).unwrap();
+    let ids: Vec<&str> = (rows.as_array().unwrap().iter())
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [id.as_str()]);
+
+    // An empty entry is refused before anything is committed, a pending
+    // hand edit included.
+    fs::write(dir.join(format!("{id}.md")), "# t\n\nEdited.\n").unwrap();
+    let before = subjects(&dir);
+    let o = try_run(&s.0, Some(&dir), &["jot"], Some("  \n"));
+    assert!(!o.status.success() && err(&o).contains("empty"));
+    assert_eq!(subjects(&dir), before);
+    assert!(!git(&dir, &["status", "--porcelain"]).is_empty());
+
+    // Triage empties the file; an empty or missing one counts nothing.
+    fs::write(&path, "").unwrap();
+    assert!(ready().ends_with("· nothing untriaged\n"), "{}", ready());
+    fs::remove_file(&path).unwrap();
+    assert!(ready().ends_with("· nothing untriaged\n"), "{}", ready());
+}
+
+#[test]
 fn close_message_is_a_log_entry() {
     let s = Scratch::new();
     let dir = s.path("d");

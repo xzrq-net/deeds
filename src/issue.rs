@@ -175,19 +175,72 @@ pub const LOG: &str = "Log";
 /// unindented `- YYYY-MM-DD …` items; the latest rather than the last, so a
 /// hand-reordered log still reads right.
 fn last_logged(log: &str) -> Option<String> {
-    log.lines()
-        .filter_map(|line| line.strip_prefix("- ")?.get(..10))
-        .filter(|date| {
-            date.bytes().enumerate().all(|(i, b)| {
-                if i == 4 || i == 7 {
-                    b == b'-'
-                } else {
-                    b.is_ascii_digit()
-                }
-            })
-        })
-        .max()
-        .map(String::from)
+    log.lines().filter_map(entry_date).max().map(String::from)
+}
+
+/// The date an unindented `- YYYY-MM-DD …` list item opens with.
+fn entry_date(line: &str) -> Option<&str> {
+    let date = line.strip_prefix("- ")?.get(..10)?;
+    let shaped = date.bytes().enumerate().all(|(i, b)| {
+        if i == 4 || i == 7 {
+            b == b'-'
+        } else {
+            b.is_ascii_digit()
+        }
+    });
+    shaped.then_some(date)
+}
+
+/// The untriaged list's file, beside the open issues: what was noticed and
+/// not yet judged, one dated list item each (`deeds jot`). Not an issue.
+pub const UNTRIAGED: &str = "untriaged.md";
+
+/// What `ready`'s summary says of the untriaged list.
+#[derive(Debug, Default, PartialEq)]
+pub struct Untriaged {
+    pub count: usize,
+    /// The earliest entry date; none if no entry is dated.
+    pub oldest: Option<String>,
+}
+
+/// Entries are the file's unindented list items, as `log_entry` writes
+/// them; one added by hand without a date still counts.
+pub fn tally_untriaged(text: &str) -> Untriaged {
+    let entries = || text.lines().filter(|line| line.starts_with("- "));
+    let dated = entries()
+        .filter_map(entry_date)
+        .filter(|date| day_number(date).is_some());
+    Untriaged {
+        count: entries().count(),
+        oldest: dated.min().map(String::from),
+    }
+}
+
+/// The tracker's untriaged list, counted; a missing file is an empty one.
+pub fn untriaged(deeds_dir: &Path) -> Result<Untriaged> {
+    let path = deeds_dir.join(UNTRIAGED);
+    match fs::read_to_string(&path) {
+        Ok(text) => Ok(tally_untriaged(&text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Untriaged::default()),
+        Err(e) => Err(e).with_context(|| format!("read {}", path.display())),
+    }
+}
+
+/// A `YYYY-MM-DD` date as a day count (days since 1970-01-01), for
+/// differences between dates.
+pub fn day_number(date: &str) -> Option<i64> {
+    let mut parts = date.splitn(3, '-').map(|p| p.parse::<i64>().ok());
+    let (y, m, d) = (parts.next()??, parts.next()??, parts.next()??);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // Howard Hinnant's days_from_civil: years start in March.
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * ((m + 9) % 12) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146_097 + doe - 719_468)
 }
 
 /// `text` with `entry` appended to its `## Log`, which ends up the last
@@ -371,6 +424,9 @@ fn load_dir(dir: &Path, closed: bool, issues: &mut Vec<Issue>) -> Result<()> {
         if !path.is_file() || path.extension().is_none_or(|e| e != "md") {
             continue;
         }
+        if path.file_name().is_some_and(|name| name == UNTRIAGED) {
+            continue;
+        }
         let id = path.file_stem().unwrap().to_string_lossy().to_string();
         let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         issues.push(parse(&id, &path, &text, closed));
@@ -513,6 +569,44 @@ mod tests {
             let entry = log_entry("d", None, note);
             let text = with_log_entry("# T\n", &entry) + "\n## For you\n\ny\n";
             assert_eq!(p(&text).for_you.as_deref(), Some("y"), "{note:?}");
+        }
+    }
+
+    #[test]
+    fn untriaged_entries_are_the_unindented_items() {
+        let text = "- 2026-03-02 app@x: b\n\n  - 2025-01-01 nested\n  more\n\
+                    - 2026-01-05: a\n- by hand, undated\n\nstray prose\n";
+        let tally = tally_untriaged(text);
+        assert_eq!(
+            (tally.count, tally.oldest.as_deref()),
+            (3, Some("2026-01-05"))
+        );
+        assert_eq!(tally_untriaged(""), Untriaged::default());
+        // A mistyped date is no entry's age, and hides no other's.
+        let tally = tally_untriaged("- 0000-00-00: x\n- 2026-02-03: z\n");
+        assert_eq!(
+            (tally.count, tally.oldest.as_deref()),
+            (2, Some("2026-02-03"))
+        );
+    }
+
+    #[test]
+    fn day_numbers_difference_dates() {
+        let days = |a: &str, b: &str| day_number(b).unwrap() - day_number(a).unwrap();
+        assert_eq!(day_number("1970-01-01"), Some(0));
+        assert_eq!(days("2026-11-05", "2026-11-17"), 12);
+        assert_eq!(days("2026-12-31", "2027-01-01"), 1);
+        // A leap day, and a century that isn't a leap year.
+        assert_eq!(days("2028-02-28", "2028-03-01"), 2);
+        assert_eq!(days("2100-02-28", "2100-03-01"), 1);
+        for bad in [
+            "2026-13-01",
+            "2026-00-10",
+            "2026-01-32",
+            "not a date",
+            "2026-01",
+        ] {
+            assert_eq!(day_number(bad), None, "{bad}");
         }
     }
 

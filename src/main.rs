@@ -15,7 +15,7 @@ use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate};
 use serde_json::json;
 
 use graph::Graph;
-use issue::{DEFAULT_TIER, Issue, find_deeds_dir, load_all, locate, mint_id, tier_name};
+use issue::{DEFAULT_TIER, Issue, Untriaged, find_deeds_dir, load_all, locate, mint_id, tier_name};
 
 const GUIDE: &str = include_str!("guide.md");
 
@@ -39,7 +39,7 @@ enum Cmd {
     /// Mint an issue from the file on stdin (frontmatter, `# Title`, body,
     /// as stored) and print its path
     New,
-    /// Open issues with no open blockers
+    /// Open issues with no open blockers, then a line of counts
     Ready,
     /// What open issues ask of the human: their `## For you` sections
     Waiting,
@@ -69,6 +69,9 @@ enum Cmd {
         #[arg(add = ArgValueCompleter::new(|current: &OsStr| issue_ids(current, true)))]
         id: String,
     },
+    /// Append stdin to the untriaged list as a dated, stamped entry: something
+    /// noticed, for a later triage to judge
+    Jot,
     /// Commit pending tracker edits; a no-op unless the tracker is its own repo
     Commit,
     /// Lint the graph; nonzero exit on errors
@@ -121,6 +124,17 @@ fn main() -> Result<()> {
                 bail!("the note comes from stdin: deeds note {id} <<'EOF'");
             };
             mutate(&deeds, &command_line(), || note(&deeds, &id, &text, json))
+        }
+        Cmd::Jot => {
+            let deeds = find_deeds_dir()?;
+            let Some(text) = stdin_text()? else {
+                bail!("the entry comes from stdin: deeds jot <<'EOF'");
+            };
+            // Refused before mutate, whose snapshot commits.
+            if text.trim().is_empty() {
+                bail!("empty entry");
+            }
+            mutate(&deeds, &command_line(), || jot(&deeds, &text, json))
         }
         Cmd::Close { id, message } => {
             let deeds = find_deeds_dir()?;
@@ -325,7 +339,8 @@ fn warn_problems(issues: &[Issue]) {
 }
 
 fn ready(json: bool) -> Result<()> {
-    let issues = load_all(&find_deeds_dir()?)?;
+    let deeds = find_deeds_dir()?;
+    let issues = load_all(&deeds)?;
     warn_problems(&issues);
     let g = Graph::new(&issues);
     let ready = g.ready();
@@ -335,10 +350,46 @@ fn ready(json: bool) -> Result<()> {
     if json {
         let rows: Vec<_> = ready.iter().map(|i| issue_json(i, &g)).collect();
         println!("{}", serde_json::to_string_pretty(&rows)?);
-    } else {
-        print_table(&ready, &g);
+        return Ok(());
     }
+    print_table(&ready, &g);
+    if !ready.is_empty() {
+        println!();
+    }
+    let untriaged = issue::untriaged(&deeds)?;
+    println!(
+        "{}",
+        summary(&issues, ready.len(), &untriaged, &vcs::today()?)
+    );
     Ok(())
+}
+
+/// `ready`'s last line: how the tracker stands, at a glance. The untriaged
+/// list shows here by count and age only; its entries are nobody's work yet.
+fn summary(issues: &[Issue], ready: usize, untriaged: &Untriaged, today: &str) -> String {
+    let today = issue::day_number(today);
+    let days_ago = |date: &str| Some(today? - issue::day_number(date)?);
+    let open = issues.iter().filter(|i| !i.closed);
+    let waiting = open.clone().filter(|i| i.for_you.is_some()).count();
+    let open = open.count();
+    let closed_lately = (issues.iter())
+        .filter(|i| i.closed)
+        .filter_map(|i| days_ago(i.last_logged.as_deref()?))
+        .filter(|days| (0..7).contains(days))
+        .count();
+    let age = (untriaged.oldest.as_deref()).and_then(days_ago);
+    let untriaged = match (untriaged.count, age) {
+        (0, _) => "nothing untriaged".to_string(),
+        (n, Some(..=0)) => format!("{n} untriaged, oldest today"),
+        (n, Some(1)) => format!("{n} untriaged, oldest 1 day"),
+        (n, Some(days)) => format!("{n} untriaged, oldest {days} days"),
+        (n, None) => format!("{n} untriaged"),
+    };
+    format!(
+        "{open} open, {} blocked, {waiting} waiting on you · \
+         {closed_lately} closed in the past week · {untriaged}",
+        open - ready
+    )
 }
 
 fn waiting(json: bool) -> Result<()> {
@@ -456,6 +507,33 @@ fn note(deeds: &Path, id: &str, text: &str, json: bool) -> Result<()> {
         println!("{}", json!({"id": id, "path": path}));
     } else {
         // The id is the file stem; printing it separately would break $(deeds new).
+        println!("{path}");
+    }
+    Ok(())
+}
+
+/// Append a stamped entry to the untriaged list, creating it if need be.
+fn jot(deeds: &Path, text: &str, json: bool) -> Result<()> {
+    let origin = vcs::origin(&std::env::current_dir()?);
+    let entry = issue::log_entry(&vcs::today()?, origin.as_deref(), text);
+    let path = deeds.join(issue::UNTRIAGED);
+    // A hand edit may have left the last line without its newline.
+    let unended = match fs::read_to_string(&path) {
+        Ok(now) => !now.is_empty() && !now.ends_with('\n'),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
+    };
+    let lead = if unended { "\n" } else { "" };
+    fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(format!("{lead}{entry}").as_bytes()))
+        .with_context(|| format!("write {}", path.display()))?;
+    let path = relative(&path);
+    if json {
+        println!("{}", json!({"path": path}));
+    } else {
         println!("{path}");
     }
     Ok(())
@@ -678,7 +756,9 @@ fn relative(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::guide;
+    use super::{guide, summary};
+    use crate::issue::{Untriaged, parse};
+    use std::path::Path;
 
     #[test]
     fn guide_drops_markers_and_their_blank_lines() {
@@ -687,5 +767,48 @@ mod tests {
             assert!(!text.contains("<!-- "), "{text}");
             assert!(!text.contains("\n\n\n"), "{text}");
         }
+    }
+
+    #[test]
+    fn summary_counts_issues_and_the_untriaged() {
+        let issue = |id: &str, text: &str, closed| parse(id, Path::new("x"), text, closed);
+        let issues = [
+            issue("aaaaaa", "# a\n\n## For you\n\n- [ ] Pick.\n", false),
+            issue("bbbbbb", "---\nblocked-by: [aaaaaa]\n---\n# b\n", false),
+            issue(
+                "cccccc",
+                "# c\n\n## Log\n\n- 2026-11-11: Closed: done\n",
+                true,
+            ),
+            issue(
+                "dddddd",
+                "# d\n\n## Log\n\n- 2026-11-10: Closed: done\n",
+                true,
+            ),
+            issue("eeeeee", "# e\n", true),
+            issue("ffffff", "# f\n", false),
+        ];
+        let untriaged = |count, oldest: Option<&str>| Untriaged {
+            count,
+            oldest: oldest.map(String::from),
+        };
+        let line = |u: &Untriaged| summary(&issues, 2, u, "2026-11-17");
+        assert_eq!(
+            line(&untriaged(9, Some("2026-11-05"))),
+            "3 open, 1 blocked, 1 waiting on you · 1 closed in the past week · \
+             9 untriaged, oldest 12 days"
+        );
+        let tail = |u: &Untriaged| line(u).rsplit(" · ").next().unwrap().to_string();
+        assert_eq!(tail(&untriaged(0, None)), "nothing untriaged");
+        assert_eq!(
+            tail(&untriaged(1, Some("2026-11-17"))),
+            "1 untriaged, oldest today"
+        );
+        assert_eq!(
+            tail(&untriaged(2, Some("2026-11-16"))),
+            "2 untriaged, oldest 1 day"
+        );
+        // Entries written by hand without dates count, ageless.
+        assert_eq!(tail(&untriaged(3, None)), "3 untriaged");
     }
 }

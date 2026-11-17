@@ -76,6 +76,17 @@ this" is checkable while a numeric urgency scale invites the priority
 inflation models learned from SWEs. Tiers never constrain edges; anything
 may block anything.
 
+**Noticed is not filed.** What an agent comes across outside its task goes
+to `untriaged.md`, a dated list beside the open issues, by `deeds jot`.
+Filed in the moment, a noticing was judged at the worst time and then picked
+off `ready` as work nobody chose; the list separates noticing from deciding,
+and a deliberate triage empties it. One file, not one per entry: triage
+reads and edits it whole, and two checkouts' appends merge by keeping both.
+It is not an issue (no id, tier or edges; the loader skips it). The query
+that consumes it is `ready`'s last line, a few counts with the list's size
+and age among them, which keeps it in view without its entries posing as
+work.
+
 **Closed issues stay, one step away.** Open issues are the tracker's top
 level, closed ones are in `closed/`, one step of navigation away from a
 browsing model; nothing summarizes or deletes them. The directory layout is
@@ -129,6 +140,7 @@ policy. Four surfaces by mutation pattern and reader distance:
 | surface       | mutation                 | reader                 | decay            |
 |---------------|--------------------------|------------------------|------------------|
 | tracker       | rewrite body, append log | future session         | close → closed/  |
+| `untriaged.md`| append                   | the next triage        | emptied by it    |
 | `docs/log.md` | append-only              | the project's readers  | never            |
 | `temp/`       | overwrite freely         | this session           | discarded        |
 | `docs/…`      | edit in place            | anyone, timeless       | never            |
